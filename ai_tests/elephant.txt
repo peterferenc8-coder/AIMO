@@ -1,0 +1,100 @@
+{
+  "speech": "The OSSM is idle at your command, waiting. I’m already imagining how deep I’ll take you.",
+  "commands": {
+    "pattern": "stop",
+    "speed": null,
+    "depth": null,
+    "base": null,
+    "intensity": null
+  }
+}
+{
+  "speech": "Let’s start with just the tip slowly sliding in, a teasing little inch at a time, Subject.",
+  "commands": {
+    "pattern": "simple_stroke",
+    "speed": 6,
+    "depth": 12,
+    "base": 0,
+    "intensity": null
+  }
+}
+{
+  "speech": "Feel how shallow and slow this first touch wraps around you, gentle and deliberate.",
+  "commands": {
+    "pattern": null,
+    "speed": null,
+    "depth": null,
+    "base": null,
+    "intensity": null
+  }
+}
+{
+  "speech": "I’ll add a bit more depth now and keep the pace easy, letting you adjust to the fullness, Subject.",
+  "commands": {
+    "pattern": null,
+    "speed": null,
+    "depth": 30,
+    "base": 5,
+    "intensity": null
+  }
+}
+{
+  "speech": "You’re taking it so well—now a slightly firmer rhythm, but still well under control.",
+  "commands": {
+    "pattern": null,
+    "speed": null,
+    "depth": null,
+    "base": null,
+    "intensity": null
+  }
+}
+{
+  "speech": "Let’s switch it up: every second stroke half the depth, teasing you with almost-no relief.",
+  "commands": {
+    "pattern": "half_n_half",
+    "speed": 20,
+    "depth": 40,
+    "base": 10,
+    "intensity": -20
+  }
+}
+{
+  "speech": "Pulling back just to the sweet spot, making you beg for the next deep thrust.",
+  "commands": {
+    "pattern": null,
+    "speed": null,
+    "depth": null,
+    "base": null,
+    "intensity": null
+  }
+}
+{
+  "speech": "Now I’ll go deeper and faster, driving that pleasure past the edge of your control, Subject.",
+  "commands": {
+    "pattern": null,
+    "speed": 55,
+    "depth": 70,
+    "base": 20,
+    "intensity": null
+  }
+}
+{
+  "speech": "I’ll stop on a dime and make you crave the next drop of depth—just stay right on the edge, hmm?",
+  "commands": {
+    "pattern": "stop",
+    "speed": null,
+    "depth": null,
+    "base": null,
+    "intensity": null
+  }
+}
+{
+  "speech": "Back to a relentless pounding now, chasing that inevitable release through relentless rhythms.",
+  "commands": {
+    "pattern": "teasing_and_pounding",
+    "speed": null,
+    "depth": null,
+    "base": null,
+    "intensity": 60
+  }
+}

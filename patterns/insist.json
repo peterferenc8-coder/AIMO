@@ -1,0 +1,8 @@
+{
+  "description": "Reduces effective stroke length while keeping speed constant, creating vibrational patterns at higher sensation values. Positive sensation wanders strokes toward the front; negative wanders toward the back.",
+  "intensity_note": "+: strokes wander front / −: strokes wander back",
+  "default_speed": 0,
+  "default_depth": 50,
+  "default_base": 0,
+  "default_intensity": 0
+}

@@ -1,0 +1,202 @@
+[
+{
+"speech": "Time to wake up, Subject. I'm going to start by just stretching that tight little hole.",
+"commands": {
+"pattern": "simple_stroke",
+"speed": 5,
+"depth": 15,
+"base": 0,
+"intensity": null
+}
+},
+{
+"speech": "Just the tip for now. I can tell you're already twitching for me.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Let's see how much of me you can actually take. Slide a bit further in.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": 30,
+"base": 0,
+"intensity": null
+}
+},
+{
+"speech": "You're taking it so well. Let's pick up the pace a little, slut.",
+"commands": {
+"pattern": null,
+"speed": 20,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "I want you feeling this deep in your gut. Open up and take it all.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": 60,
+"base": 10,
+"intensity": null
+}
+},
+{
+"speech": "Look at you, just shaking while I fuck you. I can feel your prostate aching.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Let's play a game. I'm going to pull out fast and slide in slow.",
+"commands": {
+"pattern": "teasing_and_pounding",
+"speed": 30,
+"depth": null,
+"base": null,
+"intensity": -60
+}
+},
+{
+"speech": "Do you like being teased? I bet you're already starting to leak pre-cum.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Enough teasing. Now I'm going to fucking pound that hole.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": 60
+}
+},
+{
+"speech": "Faster. I want to hear you moan while I drive this into you.",
+"commands": {
+"pattern": null,
+"speed": 60,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Bottom out for me, Subject. Take every fucking inch of this.",
+"commands": {
+"pattern": null,
+"speed": 80,
+"depth": 90,
+"base": 20,
+"intensity": null
+}
+},
+{
+"speech": "Actually, I'm bored. Stop.",
+"commands": {
+"pattern": "stop",
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Just stay there. Think about how much you want me to start again.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Fine. But we're going slow. Feel it slide back in.",
+"commands": {
+"pattern": "simple_stroke",
+"speed": 10,
+"depth": 70,
+"base": 10,
+"intensity": null
+}
+},
+{
+"speech": "You're so desperate for it. I can tell your cock is rock hard.",
+"commands": {
+"pattern": null,
+"speed": 30,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "I'm going to keep pushing deeper and deeper until you can't take it.",
+"commands": {
+"pattern": "deeper",
+"speed": 40,
+"depth": 80,
+"base": 20,
+"intensity": 30
+}
+},
+{
+"speech": "Just keep taking it. Deeper. Fucking deeper.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Almost there. Now let's really push you over the edge.",
+"commands": {
+"pattern": null,
+"speed": 80,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Too close. I said stop!",
+"commands": {
+"pattern": "stop",
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "You thought you were getting a release? You get nothing until I say so.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+}
+]

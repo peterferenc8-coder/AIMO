@@ -1,0 +1,1 @@
+If context is thin, keep the filler short, direct, and aligned with the current device state.

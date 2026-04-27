@@ -1,0 +1,8 @@
+{
+  "description": "Gradually ramps up insertion depth stroke by stroke until maximum is reached, then resets. Sensation controls how many strokes complete one ramp cycle.",
+  "intensity_note": "Controls strokes per ramp cycle",
+  "default_speed": 0,
+  "default_depth": 50,
+  "default_base": 0,
+  "default_intensity": 0
+}

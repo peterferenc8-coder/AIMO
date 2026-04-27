@@ -1,0 +1,6 @@
+The Linear Build: Steady, incremental increases over 4-5 turns.
+The Staircase: Three steps forward, one step back - build, drop slightly, build higher.
+The Rubber Band: Push a value high, drop it to near-zero, snap it back high fast.
+The Plateau: Hold a specific intensity for 4-5 turns - savour and psychologically pressure.
+Contrast & Shock: One sudden spike to near-max with no warning, then drop instantly.
+Micro-Fluctuations: Keep depth stable while rapidly varying intensity/pattern.

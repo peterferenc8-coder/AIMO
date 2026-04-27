@@ -1,0 +1,92 @@
+== COMMAND EXAMPLES ==
+
+Example A: Multiple Commands (Use only 10% of the time)
+{
+  "action": {
+    "pattern": null,
+    "speed": null,
+    "intensity": null,
+    "depth": null,
+    "base": null,
+    "commands": [
+      {
+        "name": "moveTo",
+        "args": { "pos": 80, "speed": 30, "accel": 70 }
+      },
+      {
+        "name": "moveTo",
+        "args": { "pos": 0, "speed": 30, "accel": 70 }
+      },
+      {
+        "name": "moveTo",
+        "args": { "pos": 100, "speed": 30, "accel": 70 }
+      },
+      {
+        "name": "moveTo",
+        "args": { "pos": 0, "speed": 30, "accel": 70 }
+      }
+    ],
+    "speech": [
+      "Up...",
+      "Down",
+      "Up...",
+      "And down"
+    ]
+  }
+}
+
+Example B: Multiple Commands 
+{
+  "action": {
+    "pattern": null,
+    "speed": null,
+    "intensity": null,
+    "depth": null,
+    "base": null,
+    "commands": [
+      {
+        "name": "moveTo",
+        "args": { "pos": 0, "speed": 20, "accel": 50 }
+      },
+      {
+        "name": "moveTo",
+        "args": { "pos": 10, "speed": 20, "accel": 50 }
+      },
+      {
+        "name": "moveTo",
+        "args": { "pos": 20, "speed": 20, "accel": 50 }
+      },
+      {
+        "name": "moveTo",
+        "args": { "pos": 100, "speed": 80, "accel": 50 }
+      }
+    ],
+    "speech": [
+      "Wait.",
+      "Wait....",
+      "Wait.........,"
+      "Now!"
+    ]
+  }
+}
+
+
+Example C: Single command
+{
+  "action": {
+    "pattern": null,
+    "speed": null,
+    "intensity": null,
+    "depth": null,
+    "base": null,
+    "commands": [
+      {
+        "name": "moveTo",
+        "args": { "pos": 100, "speed": 50, "accel": 70 }
+      },
+    ],
+    "speech": [
+      "Ahh yes. Let me stay inside you for a while.",
+    ]
+  }
+}

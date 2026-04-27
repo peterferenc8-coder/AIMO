@@ -1,0 +1,76 @@
+<div class="settings-layout">
+  <div class="settings-main">
+    <div class="settings-card">
+      <h3>Google AI</h3>
+      <p class="settings-note">Save a key to unlock model selection. The key is checked immediately after saving.</p>
+
+      <div class="settings-field">
+        <label for="settings-google-key">Google API Key</label>
+        <input type="password" id="settings-google-key" autocomplete="off" spellcheck="false" placeholder="Enter a new key to replace the saved one" />
+        <div class="settings-status" id="settings-google-status">Not loaded</div>
+      </div>
+
+      <div class="settings-field">
+        <label for="settings-google-model">Google Model</label>
+        <select id="settings-google-model" disabled></select>
+        <div class="settings-status" id="settings-google-model-status">Locked until a working key is present</div>
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn btn-primary" id="settings-update-google">Update API Key</button>
+      </div>
+    </div>
+
+    <div class="settings-card">
+      <h3>Groq AI</h3>
+      <p class="settings-note">Save a Groq key to unlock Groq model selection. The key is checked immediately after saving.</p>
+
+      <div class="settings-field">
+        <label for="settings-groq-key">Groq API Key</label>
+        <input type="password" id="settings-groq-key" autocomplete="off" spellcheck="false" placeholder="Enter a new key to replace the saved one" />
+        <div class="settings-status" id="settings-groq-status">Not loaded</div>
+      </div>
+
+      <div class="settings-field">
+        <label for="settings-groq-model">Groq Model</label>
+        <select id="settings-groq-model" disabled></select>
+        <div class="settings-status" id="settings-groq-model-status">Locked until a working key is present</div>
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn btn-primary" id="settings-update-groq">Update API Key</button>
+      </div>
+    </div>
+
+    <div class="settings-card">
+      <h3>Prompt Files</h3>
+      <p class="settings-note">Files are resolved from <code>prompts/current</code> first and fall back to <code>prompts/base</code>. Upload names must match an existing base file.</p>
+
+      <div class="settings-field">
+        <label for="settings-prompt-name">Prompt File</label>
+        <select id="settings-prompt-name"></select>
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn" id="settings-download">Download Selected</button>
+        <label class="btn btn-secondary settings-upload-label" for="settings-upload-file">Choose File</label>
+        <input type="file" id="settings-upload-file" accept=".txt,.json" />
+        <button class="btn btn-primary" id="settings-upload">Upload</button>
+        <button class="btn btn-danger" id="settings-revert">Revert Current Overrides</button>
+      </div>
+
+      <div class="settings-status" id="settings-prompt-status">No prompt selected yet</div>
+    </div>
+  </div>
+
+  <div class="settings-side">
+    <div class="settings-card">
+      <h3>Status</h3>
+      <div class="settings-status-line"><span>Google key</span><strong id="settings-google-key-state">Unknown</strong></div>
+      <div class="settings-status-line"><span>Google validation</span><strong id="settings-google-validation-state">Unknown</strong></div>
+      <div class="settings-status-line"><span>Groq key</span><strong id="settings-groq-key-state">Unknown</strong></div>
+      <div class="settings-status-line"><span>Groq validation</span><strong id="settings-groq-validation-state">Unknown</strong></div>
+      <div class="settings-status-line"><span>Current prompt set</span><strong id="settings-prompt-count">0 files</strong></div>
+    </div>
+  </div>
+</div>

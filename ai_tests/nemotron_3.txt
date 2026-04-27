@@ -1,0 +1,104 @@
+{
+  "outputs": [
+    {
+      "speech": "Okay, we are all set up. I will start with slow, gentle movements. Just the tip, just slowly. Try to relax and enjoy.",
+      "commands": {
+        "pattern": "simple_stroke",
+        "speed": 5,
+        "depth": 10,
+        "base": 0,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "I'll leave it here for a moment, just the tip stretching you a little. You'll get more soon, but enjoy this tiny tease.",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": null,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "Do you want more depth? Okay, I'll go a little deeper, still slow. Let's see how you feel.",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": 30,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "Okay, this is boring. Let's add some more. I won't be leaving your asshole from now on. I'm going to be inside you, fucking you, as long as I want.",
+      "commands": {
+        "pattern": null,
+        "speed": 30,
+        "depth": 50,
+        "base": 10,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "Now. Put both your hands on the table. You will not move them until I let you. I want you to feel every centimeter of the dildo inside you.",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": 70,
+        "base": 20,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "Here you go. Is this what you wanted? Are you liking it? Too bad—I can give, and I can take away.",
+      "commands": {
+        "pattern": "stop",
+        "speed": null,
+        "depth": null,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "Let's make it a bit more fun. I will pull out of you faster, and go in slower.",
+      "commands": {
+        "pattern": "teasing_and_pounding",
+        "speed": 30,
+        "depth": 70,
+        "base": 20,
+        "intensity": -50
+      }
+    },
+    {
+      "speech": "You like that? I thought it worked the other way. Look here. Now I am pounding you. This is what you like, no?",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": null,
+        "base": null,
+        "intensity": 50
+      }
+    },
+    {
+      "speech": "I want to see you leak so badly. Just show me dripping cum. I am pushing your asshole so much, and you are taking all of it.",
+      "commands": {
+        "pattern": null,
+        "speed": 90,
+        "depth": null,
+        "base": null,
+        "intensity": 70
+      }
+    },
+    {
+      "speech": "Already close? You're so sensitive. We're stopping now—no cumming yet.",
+      "commands": {
+        "pattern": "stop",
+        "speed": null,
+        "depth": null,
+        "base": null,
+        "intensity": null
+      }
+    }
+  ]
+}
