@@ -32,6 +32,31 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 }
 
 
+def _as_clean_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _normalized_validation(value: Any) -> dict[str, Any]:
+    default = DEFAULT_SETTINGS["google_validation"]
+    if not isinstance(value, dict):
+        value = default
+    return {
+        "ok": bool(value.get("ok", default["ok"])),
+        "message": str(value.get("message", default["message"])),
+        "checked_at": value.get("checked_at", default["checked_at"]),
+    }
+
+
+def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    settings["google_api_key"] = _as_clean_text(settings.get("google_api_key"))
+    settings["groq_api_key"] = _as_clean_text(settings.get("groq_api_key"))
+    settings["google_model"] = _as_clean_text(settings.get("google_model"))
+    settings["groq_model"] = _as_clean_text(settings.get("groq_model"))
+    settings["google_validation"] = _normalized_validation(settings.get("google_validation"))
+    settings["groq_validation"] = _normalized_validation(settings.get("groq_validation"))
+    return settings
+
+
 def load_settings() -> dict[str, Any]:
     settings = dict(DEFAULT_SETTINGS)
 
@@ -50,44 +75,15 @@ def load_settings() -> dict[str, Any]:
                 settings.update({k: v for k, v in loaded.items() if k in settings})
         except (OSError, json.JSONDecodeError):
             pass
-
-    settings["google_api_key"] = str(settings.get("google_api_key", "") or "").strip()
-    settings["groq_api_key"] = str(settings.get("groq_api_key", "") or "").strip()
-    settings["google_model"] = str(settings.get("google_model", "") or "").strip()
-    settings["groq_model"] = str(settings.get("groq_model", "") or "").strip()
-
-    google_validation = settings.get("google_validation")
-    if not isinstance(google_validation, dict):
-        google_validation = dict(DEFAULT_SETTINGS["google_validation"])
-    settings["google_validation"] = {
-        "ok": bool(google_validation.get("ok", False)),
-        "message": str(google_validation.get("message", "Not validated yet")),
-        "checked_at": google_validation.get("checked_at"),
-    }
-
-    groq_validation = settings.get("groq_validation")
-    if not isinstance(groq_validation, dict):
-        groq_validation = dict(DEFAULT_SETTINGS["groq_validation"])
-    settings["groq_validation"] = {
-        "ok": bool(groq_validation.get("ok", False)),
-        "message": str(groq_validation.get("message", "Not validated yet")),
-        "checked_at": groq_validation.get("checked_at"),
-    }
-
-    return settings
+    return _normalize_settings(settings)
 
 
 def save_settings(settings: dict[str, Any]) -> None:
     APP_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
-    payload = {
-        "google_api_key": str(settings.get("google_api_key", "") or "").strip(),
-        "groq_api_key": str(settings.get("groq_api_key", "") or "").strip(),
-        "google_model": str(settings.get("google_model", DEFAULT_SETTINGS["google_model"]) or "").strip(),
-        "groq_model": str(settings.get("groq_model", DEFAULT_SETTINGS["groq_model"]) or "").strip(),
-        "google_validation": settings.get("google_validation", DEFAULT_SETTINGS["google_validation"]),
-        "groq_validation": settings.get("groq_validation", DEFAULT_SETTINGS["groq_validation"]),
-    }
+    base = dict(DEFAULT_SETTINGS)
+    base.update(settings)
+    payload = _normalize_settings(base)
 
     fd, tmp_path = tempfile.mkstemp(prefix="settings_", suffix=".json", dir=APP_CONFIG_DIR)
     try:

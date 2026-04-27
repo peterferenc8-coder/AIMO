@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Flask, Response, abort, jsonify, render_template, request, send_file
 
 from ai_connector import GoogleAIConnector, GroqAIConnector
-from config import AI_TO_DEVICE_PATTERN_MAP, GROQ_MODEL, GROQ_MODEL_OPTIONS, MODEL_OPTIONS
+from config import AI_TO_DEVICE_PATTERN_MAP, GROQ_MODEL_OPTIONS, MODEL_OPTIONS
 from orchestrator import SessionOrchestrator
 from prompt_store import (
     clear_current_prompts,
@@ -29,6 +29,35 @@ from device_bridge import get_bridge
 log = logging.getLogger(__name__)
 
 _orchestrator = SessionOrchestrator()
+
+
+def _keep_existing(value: str | None, fallback: str) -> str:
+    if value is None:
+        return fallback
+    text = str(value).strip()
+    return text if text else fallback
+
+
+def _validation_from_settings(settings: dict, key: str) -> dict:
+    value = settings.get(key)
+    if isinstance(value, dict):
+        return value
+    return {
+        "ok": False,
+        "message": "Not validated yet",
+        "checked_at": None,
+    }
+
+
+def _saved_settings_payload(settings: dict) -> dict:
+    return {
+        "google_api_key_masked": mask_secret(settings.get("google_api_key", "")),
+        "groq_api_key_masked": mask_secret(settings.get("groq_api_key", "")),
+        "google_key_present": bool(settings.get("google_api_key", "")),
+        "groq_key_present": bool(settings.get("groq_api_key", "")),
+        "google_model": settings.get("google_model", ""),
+        "groq_model": settings.get("groq_model", ""),
+    }
 
 
 def _available_ai_models(settings: dict) -> list[str]:
@@ -81,16 +110,8 @@ def register_routes(app: Flask) -> None:
     def api_settings():
         settings = load_settings()
         presence = provider_presence(settings)
-        google_validation = settings.get("google_validation", {
-            "ok": False,
-            "message": "Not validated yet",
-            "checked_at": None,
-        })
-        groq_validation = settings.get("groq_validation", {
-            "ok": False,
-            "message": "Not validated yet",
-            "checked_at": None,
-        })
+        google_validation = _validation_from_settings(settings, "google_validation")
+        groq_validation = _validation_from_settings(settings, "groq_validation")
 
         return jsonify(
             {
@@ -114,17 +135,11 @@ def register_routes(app: Flask) -> None:
         body = request.get_json(silent=True) or {}
         current = load_settings()
 
-        def _keep_current(value: str | None, fallback: str) -> str:
-            if value is None:
-                return fallback
-            text = str(value).strip()
-            return text if text else fallback
-
         next_settings = {
-            "google_api_key": _keep_current(body.get("google_api_key"), current.get("google_api_key", "")),
-            "groq_api_key": _keep_current(body.get("groq_api_key"), current.get("groq_api_key", "")),
-            "google_model": _keep_current(body.get("google_model"), current.get("google_model", "")),
-            "groq_model": _keep_current(body.get("groq_model"), current.get("groq_model", "")),
+            "google_api_key": _keep_existing(body.get("google_api_key"), current.get("google_api_key", "")),
+            "groq_api_key": _keep_existing(body.get("groq_api_key"), current.get("groq_api_key", "")),
+            "google_model": _keep_existing(body.get("google_model"), current.get("google_model", "")),
+            "groq_model": _keep_existing(body.get("groq_model"), current.get("groq_model", "")),
         }
 
         google_validation = _validate_google_key(next_settings["google_api_key"], next_settings["google_model"])
@@ -139,14 +154,7 @@ def register_routes(app: Flask) -> None:
         return jsonify(
             {
                 "ok": True,
-                "saved": {
-                    "google_api_key_masked": mask_secret(next_settings.get("google_api_key", "")),
-                    "groq_api_key_masked": mask_secret(next_settings.get("groq_api_key", "")),
-                    "google_key_present": bool(next_settings.get("google_api_key", "")),
-                    "groq_key_present": bool(next_settings.get("groq_api_key", "")),
-                    "google_model": next_settings.get("google_model", ""),
-                    "groq_model": next_settings.get("groq_model", ""),
-                },
+                "saved": _saved_settings_payload(next_settings),
                 "google_validation": google_validation,
                 "groq_validation": groq_validation,
                 "prompt_names": list_base_prompt_names(),
