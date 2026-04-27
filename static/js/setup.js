@@ -16,6 +16,49 @@ window.addEventListener('device-homed', () => {
   markSetupComplete();
 });
 
+async function waitForEngineReady(timeoutMs = 8000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const res = await fetch('/api/device/state');
+    const data = await res.json();
+    if (data.ok && data.engineReady) return true;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
+const launchLinuxEmuBtn = document.getElementById('setup-launch-linux-emulator');
+if (launchLinuxEmuBtn) {
+  launchLinuxEmuBtn.addEventListener('click', async () => {
+    const statusEl = document.getElementById('setup-emulator-status');
+    launchLinuxEmuBtn.disabled = true;
+    if (statusEl) statusEl.textContent = 'Starting...';
+
+    try {
+      const res = await fetch('/api/device/serial_emulator/start', { method: 'POST' });
+      const data = await res.json();
+      if (!data.ok) {
+        throw new Error(data.error || 'Could not launch emulator');
+      }
+
+      // Device emulator binds to device_port; controller should connect to the peer port.
+      const controllerPort = (data.controller_port || '').trim();
+      if (controllerPort) {
+        document.getElementById('device-url').value = controllerPort;
+      }
+
+      if (statusEl) {
+        statusEl.textContent = `Ready: emulator ${data.device_port} -> app ${data.controller_port}`;
+      }
+    } catch (err) {
+      if (statusEl) statusEl.textContent = 'Failed';
+      window.App.showError('Linux emulator start failed: ' + err.message);
+    } finally {
+      launchLinuxEmuBtn.disabled = false;
+    }
+  });
+}
+
 // Connection toggle
 document.getElementById('setup-connect').addEventListener('click', async () => {
   const btn = document.getElementById('setup-connect');
@@ -64,16 +107,26 @@ document.getElementById('setup-jog-bwd-2').addEventListener('click', () => windo
 document.getElementById('setup-jog-fwd-2').addEventListener('click', () => window.App.sendDeviceCmd({ cmd: 'jogFwd' }));
 
 document.getElementById('setup-set-zero').addEventListener('click', async () => {
+  await window.App.sendDeviceCmd({ cmd: 'stop' });
   await window.App.sendDeviceCmd({ cmd: 'setZero' });
   setSetupStep(2);
 });
 
 document.getElementById('setup-set-max').addEventListener('click', async () => {
+  await window.App.sendDeviceCmd({ cmd: 'stop' });
   await window.App.sendDeviceCmd({ cmd: 'setMax' });
+
+  const ready = await waitForEngineReady(10000);
+  if (!ready) {
+    window.App.showError('Set Max timed out waiting for engine init. Try Set Max again.');
+    return;
+  }
+
   setSetupStep(3);
 });
 
 document.getElementById('setup-home').addEventListener('click', async () => {
+  await window.App.sendDeviceCmd({ cmd: 'stop' });
   await window.App.sendDeviceCmd({ cmd: 'moveTo', pct: 0 });
 });
 
