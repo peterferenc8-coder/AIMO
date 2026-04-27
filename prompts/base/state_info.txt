@@ -1,0 +1,28 @@
+LEGACY NOTE: This file is used by legacy runtime only (legacy/config.py and legacy/brain.py). Active runtime builds state context via prompt_builder.py and prompts/runtime/*.txt.
+
+== STATE INFO ==
+Session time     : {session_time}
+Seconds on current settings : {seconds_on_current}
+
+Current device state:
+  Pattern  : {current_pattern}
+  Speed    : {current_speed}
+  Intensity: {current_intensity}
+  Depth    : {current_depth}
+  Base     : {current_base}
+
+Recent pattern history (oldest → newest):
+  {recent_patterns}
+
+Recent speech (do NOT repeat these):
+{recent_speech}
+
+Action counts this session:
+  {action_counts}
+
+== USER EVENTS ==
+{user_events}
+
+== INSTRUCTION ==
+Based on the above, decide your next speech and device commands.
+Remember: null = no change. Only change what you intend to change.

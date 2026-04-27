@@ -1,0 +1,82 @@
+<div class="ai-layout">
+  <div class="ai-sidebar">
+    <div class="ai-controls">
+      <div class="control-group">
+        <label for="ai-n-turns">Turns</label>
+        <input type="number" id="ai-n-turns" value="20" min="5" max="40" step="5" />
+      </div>
+      <div class="control-group">
+        <label for="ai-persona">Persona</label>
+        <select id="ai-persona">
+          <option value="random" selected>Random</option>
+          {% for mood in persona_moods %}
+          <option value="{{ mood }}">{{ mood }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="ai-pacing">Pacing</label>
+        <select id="ai-pacing">
+          <option value="random" selected>Random</option>
+          {% for strategy in pacing_strategies %}
+          <option value="{{ strategy }}">{{ strategy }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="ai-model">Model</label>
+        <select id="ai-model">
+          {% if not model_options %}
+          <option value="" selected disabled>No validated provider key available</option>
+          {% endif %}
+          {% for model in model_options %}
+          <option value="{{ model }}" {% if model==selected_model %}selected{% endif %}>{{ model }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="ai-actions">
+        <button class="btn btn-primary" id="ai-start">Start Session</button>
+        <button class="btn btn-secondary" id="ai-pause" disabled>Pause</button>
+        <button class="btn btn-secondary" id="ai-resume" disabled>Resume</button>
+        <button class="btn btn-ghost" id="ai-clear">Clear</button>
+      </div>
+
+      <div id="ai-spinner" class="spinner" style="display:none;"></div>
+      <div id="ai-status" class="status-idle">Idle</div>
+      <div id="ai-timer" class="timer"></div>
+    </div>
+
+    <div class="ai-params">
+      <h4>Current Parameters</h4>
+      <div class="param-chip"><span>Pattern</span> <b id="ai-param-pattern">--</b></div>
+      <div class="param-chip"><span>Speed</span> <b id="ai-param-speed">--</b></div>
+      <div class="param-chip"><span>Depth</span> <b id="ai-param-depth">--</b></div>
+      <div class="param-chip"><span>Base</span> <b id="ai-param-base">--</b></div>
+      <div class="param-chip"><span>Intensity</span> <b id="ai-param-intensity">--</b></div>
+    </div>
+
+    <div class="ai-device-panel">
+      {% include 'block_device_gauge.html' %}
+    </div>
+  </div>
+
+  <div class="ai-stream">
+    <div class="stream-header">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+      </svg>
+      Session Stream
+      <span class="count" id="ai-count-stream">0</span>
+    </div>
+    <div class="stream-body" id="ai-list-stream">
+      <div class="empty-state">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M8 12h8M12 8v8" />
+        </svg>
+        Start a session to see the stream
+      </div>
+    </div>
+  </div>
+</div>

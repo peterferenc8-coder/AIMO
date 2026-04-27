@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OSSM Controller</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+  <header>
+    <h1>⬡ OSSM Controller</h1>
+    <div class="header-right">
+      <div class="health-group">
+        <span id="health-dot" class="dot"></span>
+        <span id="health-label">Checking…</span>
+      </div>
+      <button class="btn btn-danger" id="btn-global-stop" title="Emergency Stop">STOP</button>
+    </div>
+  </header>
+
+  <div id="error-banner"></div>
+
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab="setup" id="tab-btn-setup">1. Setup</button>
+    <button class="tab-btn" data-tab="manual" id="tab-btn-manual" disabled>2. Manual</button>
+    <button class="tab-btn" data-tab="ai" id="tab-btn-ai" disabled>3. AI Session</button>
+    <button class="tab-btn" data-tab="settings" id="tab-btn-settings">4. Settings</button>
+  </nav>
+
+  <main class="tab-content">
+    <section id="tab-setup" class="tab-pane active">
+      {% include 'tab_setup.html' %}
+    </section>
+    <section id="tab-manual" class="tab-pane">
+      {% include 'tab_manual.html' %}
+    </section>
+    <section id="tab-ai" class="tab-pane">
+      {% include 'tab_ai.html' %}
+    </section>
+    <section id="tab-settings" class="tab-pane">
+      {% include 'tab_settings.html' %}
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/setup.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/manual.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/ai.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/settings.js') }}"></script>
+</body>
+</html>

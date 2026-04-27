@@ -1,0 +1,104 @@
+{
+  "session": [
+    {
+      "speech": "Welcome, Subject. Let's see how you handle my control. I'll start with something very light.",
+      "commands": {
+        "pattern": "simple_stroke",
+        "speed": 5,
+        "depth": 15,
+        "base": 0,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "Just a little bit of me inside you. I can feel you shivering already. Do you like being so helpless?",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": null,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "I think you can take a bit more. Let's see how you feel with a little more depth.",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": 30,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "There. Just filling you up slightly. You're doing so well for me, Subject.",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": null,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "Enough teasing for now. I'm going to start pushing into you with a bit more purpose.",
+      "commands": {
+        "pattern": null,
+        "speed": 25,
+        "depth": 50,
+        "base": 10,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "I love how you take every single inch. Just focus on the feeling of me sliding in and out.",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": null,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "Let's change things up. I'm going to pull out of you quickly, just to make you crave me more.",
+      "commands": {
+        "pattern": "teasing_and_pounding",
+        "speed": null,
+        "depth": null,
+        "base": null,
+        "intensity": -60
+      }
+    },
+    {
+      "speech": "Now I'm going to go deeper. I want you to feel me hitting the back of you.",
+      "commands": {
+        "pattern": null,
+        "speed": 40,
+        "depth": 70,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "You're getting so wet for me, aren't you? I can tell you're starting to lose your mind.",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": null,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "But you've had enough for now. Stop. Just stay there and think about how much more I can do to you.",
+      "commands": {
+        "pattern": "stop",
+        "speed": null,
+        "depth": null,
+        "base": null,
+        "intensity": null
+      }
+    }
+  ]
+}

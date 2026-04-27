@@ -1,0 +1,41 @@
+<div class="manual-layout">
+  <div class="manual-controls">
+    <div class="control-group">
+      <label for="manual-pattern">Pattern</label>
+      <select id="manual-pattern">
+        {% for p in patterns %}
+        <option value="{{ p.index }}">{{ p.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="slider-group">
+      <label>Speed <span class="slider-value" id="val-speed">30%</span></label>
+      <input type="range" id="manual-speed" min="0" max="100" value="30">
+    </div>
+
+    <div class="slider-group">
+      <label>Depth <span class="slider-value" id="val-depth">100%</span></label>
+      <input type="range" id="manual-depth" min="0" max="100" value="100">
+    </div>
+
+    <div class="slider-group">
+      <label>Base <span class="slider-value" id="val-base">0%</span></label>
+      <input type="range" id="manual-base" min="0" max="100" value="0">
+    </div>
+
+    <div class="slider-group">
+      <label>Intensity <span class="slider-value" id="val-intensity">0</span></label>
+      <input type="range" id="manual-intensity" min="-100" max="100" value="0">
+    </div>
+
+    <div class="manual-actions">
+      <button class="btn btn-primary" id="manual-start">Start Pattern</button>
+      <button class="btn btn-ghost" id="manual-stop">Stop</button>
+    </div>
+  </div>
+
+  <div class="manual-device-panel">
+    {% include 'block_device_gauge.html' %}
+  </div>
+</div>

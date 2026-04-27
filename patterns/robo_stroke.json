@@ -1,0 +1,8 @@
+{
+  "description": "Controls stroke acceleration via sensation. Positive values increase acceleration until motion feels robotic/constant-speed; zero equals Simple Stroke; negative values reduce into a triangle profile.",
+  "intensity_note": "+: more constant/robotic speed / −: triangle acceleration profile",
+  "default_speed": 0,
+  "default_depth": 50,
+  "default_base": 0,
+  "default_intensity": 0
+}

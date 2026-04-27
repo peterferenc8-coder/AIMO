@@ -1,0 +1,8 @@
+{
+  "description": "Adjusts the speed ratio between in and out movements. Positive sensation makes the in-move faster (up to 5×) for a hard pounding feel; negative sensation makes the out-move faster for teasing. Overall stroke time stays constant.",
+  "intensity_note": "+: faster in-stroke (pounding) / −: faster out-stroke (teasing)",
+  "default_speed": 0,
+  "default_depth": 50,
+  "default_base": 0,
+  "default_intensity": 0
+}

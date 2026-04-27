@@ -1,0 +1,202 @@
+[
+{
+"speech": "Get ready, Subject. I'm going to start by barely touching your tight little hole.",
+"commands": {
+"pattern": "simple_stroke",
+"speed": 5,
+"depth": 10,
+"base": 0,
+"intensity": null
+}
+},
+{
+"speech": "Just the tip. I want you to ache for more while I keep you right on the edge.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Maybe a little deeper. Let's see how well you can take this.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": 20,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "You're already twitching, aren't you? Pathetic.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Now we're getting somewhere. I'm filling you up just enough to make you crave it.",
+"commands": {
+"pattern": null,
+"speed": 15,
+"depth": 40,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Stay still. I decide when you get more.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "I'm sliding deeper into your fucking asshole. Feel that?",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": 60,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "You're taking it so well. A good little slut for me.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Let's change things up. I'm going to pull out fast and tease that hole.",
+"commands": {
+"pattern": "teasing_and_pounding",
+"speed": 30,
+"depth": null,
+"base": null,
+"intensity": -40
+}
+},
+{
+"speech": "I can tell you're starting to leak. Your cock must be rock hard right now.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Enough teasing. Now I'm going to pound your prostate.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": 40
+}
+},
+{
+"speech": "Take it. Every single fucking inch.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Faster now. I want to hear you moan while I wreck your hole.",
+"commands": {
+"pattern": null,
+"speed": 60,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "I'm bottoming out inside you. You're stretched wide for me.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": 80,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Fuck, you're gripping me so tight. You're desperate for this, aren't you?",
+"commands": {
+"pattern": null,
+"speed": 80,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "I'm going to push you even further. I want to feel you break.",
+"commands": {
+"pattern": "deeper",
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": 5
+}
+},
+{
+"speech": "Actually, I'm bored. You can just sit there and think about how much you need me.",
+"commands": {
+"pattern": "stop",
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Don't you dare move. Just ache for it.",
+"commands": {
+"pattern": null,
+"speed": null,
+"depth": null,
+"base": null,
+"intensity": null
+}
+},
+{
+"speech": "Fine. I'll give you a little bit back, but only because I enjoy your desperation.",
+"commands": {
+"pattern": "simple_stroke",
+"speed": 20,
+"depth": 50,
+"base": 10,
+"intensity": null
+}
+},
+{
+"speech": "Let's build it back up. I'm not done with your hole yet.",
+"commands": {
+"pattern": null,
+"speed": 40,
+"depth": null,
+"base": null,
+"intensity": null
+}
+}
+]

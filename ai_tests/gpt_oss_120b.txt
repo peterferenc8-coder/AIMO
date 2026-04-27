@@ -1,0 +1,104 @@
+{
+  "steps": [
+    {
+      "speech": "Subject, I'm beginning now. Feel the tip gently entering, just a whisper.",
+      "commands": {
+        "pattern": "simple_stroke",
+        "speed": 5,
+        "depth": 10,
+        "base": 0,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "Just a tiny kiss, barely inside. Let the anticipation build.",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": null,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "I'm sliding a bit deeper now, the length creeping inside you.",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": 20,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "Speed is picking up, a smooth rhythm you can feel pulsing.",
+      "commands": {
+        "pattern": null,
+        "speed": 10,
+        "depth": null,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "More depth, the pressure rises as I fill you more.",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": 35,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "I'm maintaining the flow, letting you savor each centimeter.",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": null,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "Now the tempo climbs, a firmer cadence driving you.",
+      "commands": {
+        "pattern": null,
+        "speed": 20,
+        "depth": null,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "Depth is at its sweet spot, filling you fully at this pace.",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": 50,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "Hold steady, the sensation steadies, the rhythm staying constant.",
+      "commands": {
+        "pattern": null,
+        "speed": null,
+        "depth": null,
+        "base": null,
+        "intensity": null
+      }
+    },
+    {
+      "speech": "Time to change the game; I'll pull out faster and thrust slower, teasing you.",
+      "commands": {
+        "pattern": "teasing_and_pounding",
+        "speed": null,
+        "depth": null,
+        "base": null,
+        "intensity": -50
+      }
+    }
+  ]
+}

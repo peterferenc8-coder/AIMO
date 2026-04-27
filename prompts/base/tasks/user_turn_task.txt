@@ -1,0 +1,1 @@
+You are given {n_turns} turns to continue the session. Maintain continuity with the previous context and keep the action coherent.

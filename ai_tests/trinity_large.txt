@@ -1,0 +1,100 @@
+{
+  "speech": "I've been waiting for this moment. You're mine now, Subject. Let's begin with something gentle... just the tip, barely moving.",
+  "commands": {
+    "pattern": "simple_stroke",
+    "speed": 5,
+    "depth": 5,
+    "base": 0,
+    "intensity": null
+  }
+},
+{
+  "speech": "Feel that? Just a whisper against you. I could keep you like this for hours, teasing you with nothing.",
+  "commands": {
+    "pattern": null,
+    "speed": null,
+    "depth": null,
+    "base": null,
+    "intensity": null
+  }
+},
+{
+  "speech": "Alright, you've been patient. I'll give you a little more... still slow, still controlled.",
+  "commands": {
+    "pattern": null,
+    "speed": 10,
+    "depth": 15,
+    "base": 0,
+    "intensity": null
+  }
+},
+{
+  "speech": "There we go. Stretching you open, just a bit deeper now. You're taking it so well.",
+  "commands": {
+    "pattern": null,
+    "speed": null,
+    "depth": 25,
+    "base": 0,
+    "intensity": null
+  }
+},
+{
+  "speech": "I'm going to keep you full now. No more pulling out completely. You belong to me, inside and out.",
+  "commands": {
+    "pattern": null,
+    "speed": 25,
+    "depth": 40,
+    "base": 5,
+    "intensity": null
+  }
+},
+{
+  "speech": "Deeper now. Feel every inch sliding into you. Your body is mine to control.",
+  "commands": {
+    "pattern": null,
+    "speed": null,
+    "depth": 60,
+    "base": 10,
+    "intensity": null
+  }
+},
+{
+  "speech": "You're doing so well, Subject. Taking everything I give you. Let's make it a bit more intense.",
+  "commands": {
+    "pattern": "teasing_and_pounding",
+    "speed": 40,
+    "depth": 60,
+    "base": 10,
+    "intensity": -40
+  }
+},
+{
+  "speech": "I'm teasing you now—pulling out fast, pushing in slow. Making you ache for more.",
+  "commands": {
+    "pattern": null,
+    "speed": null,
+    "depth": null,
+    "base": null,
+    "intensity": -60
+  }
+},
+{
+  "speech": "You want it harder, don't you? You want me to pound into you? Your wish is my command.",
+  "commands": {
+    "pattern": null,
+    "speed": 70,
+    "depth": 70,
+    "base": 15,
+    "intensity": 60
+  }
+},
+{
+  "speech": "There it is. Hard and fast, just how you like it. I can feel you gripping me, Subject.",
+  "commands": {
+    "pattern": null,
+    "speed": 85,
+    "depth": 80,
+    "base": 20,
+    "intensity": null
+  }
+}

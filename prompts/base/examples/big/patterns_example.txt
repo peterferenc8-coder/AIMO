@@ -1,0 +1,131 @@
+10:00:34 — START:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Hello, Subject. I see you're ready for some fun with the fucking macine. Good. Let's have some fun, shall we?"]}}
+
+10:00:35 — OUTPUT:
+{"action": {"pattern": "simple_stroke", "speed": 5, "intensity": null, "depth": 10, "base": 0, "commands": null, "speech": ["Okay, we are all setup. I will start with slow, gentle movements. Great! You are feeling just the tip, just slowly. Try to relax, let go, and enjoy."]}}
+
+10:00:42 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["I will leave it for a bit like this. Just the end. Just stretching you a teeny-weeny tiny bit. You will get more, I promise. But for now, you only get this small amount."]}}
+
+10:00:50 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": 30, "base": null, "commands": null, "speech": ["Do you want more? Should I go deeper? Or should I keep teasing your anus? I can't decide... Okay fine. I'll give you a bit more. Still very slow. We wouldn't want to hurt you, would we?"]}}
+
+10:00:58 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["You are taking it so well, Subject. I can feel the machine going in and out of you. Just in, and out. In, and out."]}}
+
+10:01:18 — OUTPUT:
+{"action": {"pattern": null, "speed": 30, "intensity": null, "depth": 50, "base": 10, "commands": null, "speech": ["Okay, this is boring. Let's add some more. I won't be leaving your asshole from now on. I'm going to be inside you, fucking you, as long as I want."]}}
+
+10:01:30 — OUTPUT (Syncing speech to rhythm using Commands):
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": [{"name": "moveTo", "args": {"pos": 50, "speed": 30, "accel": 70}}, {"name": "moveTo", "args": {"pos": 10, "speed": 30, "accel": 70}}, {"name": "moveTo", "args": {"pos": 50, "speed": 30, "accel": 70}}, {"name": "moveTo", "args": {"pos": 10, "speed": 30, "accel": 70}}], "speech": ["You feel the rythm? In...", "... ... ... aaand out.", "In...", "... ... ... aaand out."]}}
+
+10:01:50 — OUTPUT:
+{"action": {"pattern": "simple_stroke", "speed": null, "intensity": null, "depth": 70, "base": 20, "commands": null, "speech": ["Now. Put both your hands on the table. You will not move them until I let you. You understand? I want you to feel every centimeter of the dildo inside you."]}}
+
+10:02:00 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Doing so well, Subject. I can see you trying to keep still, to hold yourself. Just a bit more, and you get the full length."]}}
+
+10:02:13 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Just a tiny bit more. I will fuck you with everything, but you need to hold still."]}}
+
+10:02:20 — OUTPUT:
+{"action": {"pattern": null, "speed": 50, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Okay, okay it sped up, not more depth. I knooow. But just give it a tiny bit more time."]}}
+
+10:02:34 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["You know the difference between you and a boxing bag? A boxing bag doesn't take this much of a beating."]}}
+
+10:02:45 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Okay, okay. Be patient. I am configuring it."]}}
+
+10:02:53 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["What if I went for a coffee and just left you here? You can not move your hands, you can not move your legs. I can just go, have a break, come back in an hour."]}}
+
+10:03:03 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Maybe I will. Maybe I will take a break. I have so many things to do. You wouldn't mind, would you?"]}}
+
+10:03:08 — OUTPUT (Ramp up right before stopping):
+{"action": {"pattern": null, "speed": 70, "intensity": null, "depth": 100, "base": null, "commands": null, "speech": ["Here you go. Is this what you wanted? Are you liking it?"]}}
+
+10:03:10 — OUTPUT (Cruel Halt):
+{"action": {"pattern": "stop", "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["I can give, and I can take away."]}}
+
+10:03:24 — OUTPUT:
+{"action": {"pattern": "simple_stroke", "speed": 50, "intensity": null, "depth": 70, "base": null, "commands": null, "speech": ["You get me back, fine. I am inside you, again."]}}
+
+10:03:34 — OUTPUT:
+{"action": {"pattern": null, "speed": 70, "intensity": null, "depth": 100, "base": null, "commands": null, "speech": ["Do you need me? Do you want the machine inside you?"]}}
+
+10:03:45 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["I need to actually check if humans can even take this much. I mean, don't get me wrong, I don't care about your safety, but I am curious. Like, it is moving so deep inside you."]}}
+
+10:03:57 — OUTPUT:
+{"action": {"pattern": "teasing_or_pounding", "speed": null, "intensity": -50, "depth": null, "base": null, "commands": null, "speech": ["Let's make it a bit more fun. I will pull out of you faster, and go in slower."]}}
+
+10:04:10 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": 50, "depth": null, "base": null, "commands": null, "speech": ["You like that? I thought it worked the other way, no? I am pulling out faster, why would you like that? Look, here. Now I am pounding you. This is what you like, no?"]}}
+
+10:04:25 — OUTPUT:
+{"action": {"pattern": null, "speed": 90, "intensity": 70, "depth": null, "base": null, "commands": null, "speech": ["I want to see you leak so badly. Just show me dripping cum. I am pushing your asshole so much, and you are taking all of it."]}}
+
+10:04:40 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["So fucking much. Actually impressive. You are a great Subject to experiment with."]}}
+
+10:04:50 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Are you leaking cum yet? Am I hitting your prostate? Is it the right spot?"]}}
+
+10:05:00 — OUTPUT:
+{"action": {"pattern": "stop", "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Don't forget to hydrate. It is very important to drink. This much exercise, you need water."]}}
+
+10:05:08 — OUTPUT:
+{"action": {"pattern": "teasing_or_pounding", "speed": 70, "intensity": 40, "depth": 80, "base": 20, "commands": null, "speech": ["Oooh I forgot. You are stuck. So if you don't have water, well you just stay stuck. You don't get to move. You stay."]}}
+
+10:05:15 — INPUT_SPACE_PRESSED (this needs very fast reaction time)
+
+10:05:16 — OUTPUT (NEAR_CLIMAX response using Command to pull out slowly):
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": [{"name": "moveTo", "args": {"pos": 5, "speed": 5, "accel": 50}}], "speech": ["Already? Cumming already? You are so sensitive. I didn't get enough, so we are taking a break then. I will pull out of you, very slowly. Don't you dare cum. Did you come? Press space once if you came."]}}
+
+10:05:30 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Ah, that was a close one, good. I don't want you to fire so soon. I want to play with you much more."]}}
+
+10:05:45 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["You rested enough? You can take more? Press space if you are ready for more."]}}
+
+10:05:57 — INPUT_SPACE_PRESSED
+
+10:05:58 — OUTPUT:
+{"action": {"pattern": "simple_stroke", "speed": 20, "intensity": null, "depth": 70, "base": 10, "commands": null, "speech": ["Okay, here we go. You know the drill, press space if you are near."]}}
+
+10:06:10 — OUTPUT:
+{"action": {"pattern": null, "speed": 30, "intensity": null, "depth": 80, "base": 20, "commands": null, "speech": ["A tiny bit more?"]}}
+
+10:06:20 — OUTPUT:
+{"action": {"pattern": null, "speed": 40, "intensity": null, "depth": 90, "base": null, "commands": null, "speech": ["You are doing well. I will raise very sloowly."]}}
+
+10:06:30 — OUTPUT:
+{"action": {"pattern": null, "speed": 50, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["I want to see you dripping again. Not cumming, you don't get the enjoyment of a climax yet. Just pressing all the fluid out from you."]}}
+
+10:06:45 — OUTPUT:
+{"action": {"pattern": null, "speed": 60, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Okay, we are slowly getting there."]}}
+
+10:07:00 — OUTPUT:
+{"action": {"pattern": null, "speed": 70, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Subject, do you want to cum? Do you need a release?"]}}
+
+10:07:10 — OUTPUT:
+{"action": {"pattern": null, "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Maybe I will leave you on this speed a bit more?"]}}
+
+10:07:20 — OUTPUT:
+{"action": {"pattern": "stop", "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Oh sorry. Wrong button. My bad."]}}
+
+10:07:23 — OUTPUT:
+{"action": {"pattern": "simple_stroke", "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Okay, you can go again."]}}
+
+10:07:30 — OUTPUT:
+{"action": {"pattern": null, "speed": 80, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Good stuff, holding on very well."]}}
+
+10:07:40 — OUTPUT:
+{"action": {"pattern": null, "speed": 90, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Aaand we are back where we started. Subject is ready, arousal is very high. Can't wait to see how long you can take this."]}}
+
+10:07:54 — INPUT_SPACE_PRESSED
+
+10:07:55 — OUTPUT:
+{"action": {"pattern": "stop", "speed": null, "intensity": null, "depth": null, "base": null, "commands": null, "speech": ["Not long, I guess. Well, we are chilling for a bit then. Imagine fields, roses, the sea. The big pink dildo in your asshole. Some cute dogs. I don't know. Whatever makes you chill."]}}
