@@ -6,6 +6,13 @@ All Flask HTTP routes for the dual-model OSSM Controller.
 
 import json
 import logging
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import atexit
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, render_template, request, send_file
@@ -29,6 +36,148 @@ from device_bridge import get_bridge
 log = logging.getLogger(__name__)
 
 _orchestrator = SessionOrchestrator()
+
+
+class _SerialEmulatorLauncher:
+    """Starts/stops a local PTY bridge and emulator process for setup testing."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._socat_proc: subprocess.Popen[str] | None = None
+        self._emu_proc: subprocess.Popen[str] | None = None
+        self.device_port: str | None = None
+        self.controller_port: str | None = None
+        self.device_link = "/tmp/aimee_pty_device"
+        self.controller_link = "/tmp/aimee_pty_app"
+        atexit.register(self.stop)
+
+    def start(self) -> dict[str, str | bool]:
+        with self._lock:
+            if self._is_running():
+                return {
+                    "ok": True,
+                    "already_running": True,
+                    "device_port": self.device_port or "",
+                    "controller_port": self.controller_port or "",
+                }
+
+            self._stop_locked()
+
+            if shutil.which("socat") is None:
+                return {
+                    "ok": False,
+                    "error": "socat is not installed. Install it first: sudo apt install socat",
+                }
+
+            self._cleanup_pty_links()
+
+            try:
+                self._socat_proc = subprocess.Popen(
+                    [
+                        "socat",
+                        f"pty,raw,echo=0,link={self.device_link},mode=666",
+                        f"pty,raw,echo=0,link={self.controller_link},mode=666",
+                    ],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                )
+            except Exception as exc:
+                self._stop_locked()
+                return {"ok": False, "error": f"Failed to start socat: {exc}"}
+
+            if not self._wait_for_pty_links(timeout_sec=3.0):
+                self._stop_locked()
+                return {
+                    "ok": False,
+                    "error": "Could not create PTY links under /tmp.",
+                }
+
+            self.device_port, self.controller_port = self.device_link, self.controller_link
+
+            emulator_path = Path(__file__).resolve().parent / "device_emulator.py"
+            try:
+                self._emu_proc = subprocess.Popen(
+                    [sys.executable, str(emulator_path), "--serial", self.device_port],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                )
+            except Exception as exc:
+                self._stop_locked()
+                return {"ok": False, "error": f"Failed to start emulator: {exc}"}
+
+            # Give the emulator a brief moment to fail fast if startup is invalid.
+            time.sleep(0.2)
+            if self._emu_proc.poll() is not None:
+                self._stop_locked()
+                return {
+                    "ok": False,
+                    "error": "device_emulator.py exited immediately after launch.",
+                }
+
+            return {
+                "ok": True,
+                "already_running": False,
+                "device_port": self.device_port,
+                "controller_port": self.controller_port,
+            }
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stop_locked()
+
+    def _stop_locked(self) -> None:
+        for proc in (self._emu_proc, self._socat_proc):
+            if not proc:
+                continue
+            try:
+                proc.terminate()
+                proc.wait(timeout=1.5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+        self._emu_proc = None
+        self._socat_proc = None
+        self.device_port = None
+        self.controller_port = None
+        self._cleanup_pty_links()
+
+    def _is_running(self) -> bool:
+        return (
+            self._socat_proc is not None
+            and self._socat_proc.poll() is None
+            and self._emu_proc is not None
+            and self._emu_proc.poll() is None
+            and bool(self.device_port)
+            and bool(self.controller_port)
+        )
+
+    def _wait_for_pty_links(self, timeout_sec: float) -> bool:
+        deadline = time.time() + timeout_sec
+        while time.time() < deadline:
+            if self._socat_proc is None or self._socat_proc.poll() is not None:
+                return False
+            if os.path.exists(self.device_link) and os.path.exists(self.controller_link):
+                return True
+            time.sleep(0.05)
+        return False
+
+    def _cleanup_pty_links(self) -> None:
+        for path in (self.device_link, self.controller_link):
+            try:
+                if os.path.islink(path) or os.path.exists(path):
+                    os.unlink(path)
+            except Exception:
+                pass
+
+
+_serial_emulator = _SerialEmulatorLauncher()
 
 
 def _keep_existing(value: str | None, fallback: str) -> str:
@@ -280,6 +429,18 @@ def register_routes(app: Flask) -> None:
         _device.disconnect()
         return jsonify({"ok": True})
 
+    @app.post("/api/device/serial_emulator/start")
+    def api_device_serial_emulator_start():
+        """Start a local Linux PTY pair and attach device_emulator.py to one side."""
+        result = _serial_emulator.start()
+        status = 200 if result.get("ok") else 500
+        return jsonify(result), status
+
+    @app.post("/api/device/serial_emulator/stop")
+    def api_device_serial_emulator_stop():
+        _serial_emulator.stop()
+        return jsonify({"ok": True})
+
     @app.post("/api/device/home")
     def api_device_home():
         """Home the device by sending setZero."""
@@ -324,6 +485,12 @@ def register_routes(app: Flask) -> None:
         body = request.get_json(silent=True) or {}
         if "cmd" not in body:
             return jsonify({"ok": False, "error": "Missing cmd"}), 400
+
+        serial_obj = getattr(_device, "ser", None)
+        serial_connected = bool(serial_obj and getattr(serial_obj, "is_open", False))
+        if not _device.connected and not serial_connected:
+            return jsonify({"ok": False, "error": "Device is not connected"}), 409
+
         _device.send(body)
         return jsonify({"ok": True})
 
