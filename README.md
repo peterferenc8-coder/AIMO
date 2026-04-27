@@ -18,7 +18,7 @@ Open http://localhost:5000 in your browser.
 
 ## Settings
 
-The app stores runtime API keys in a local settings file at `~/.config/aimee/settings.json`. The server falls back to environment variables on startup, and the Settings tab lets you update the saved values without editing source files.
+The app stores runtime API keys in a local settings file at `~/.config/aimee/settings.json`. The Settings tab lets you update the saved values without editing source files.
 
 The Settings tab includes:
 
