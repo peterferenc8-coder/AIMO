@@ -3,8 +3,9 @@ brain.py
 --------
 The Brain is the creative director of the application.
 
-It holds session state (which turns have happened, what was said) and
-orchestrates prompt construction via PromptBuilder.
+Manages session state and coordinates prompt generation for stateful
+chat sessions. The system prompt is sent once at session start; 
+subsequent turns only send minimal user prompts.
 """
 
 import logging
@@ -23,37 +24,57 @@ class Brain:
     Typical lifecycle::
 
         brain = Brain()
-        prompt_data = brain.build_prompt(n_turns=5)
-        # … call AI …
-        brain.record_turns(parsed_turns)
+        system_prompt = brain.get_system_prompt()
+        connector.start_session(system_prompt)
+        
+        seed_prompt = brain.build_seed_prompt(persona="...", pacing="...")
+        connector.send_message(seed_prompt)
+        
+        # ... later ...
+        user_prompt = brain.build_turn_prompt(n_turns=5, device_state=...)
+        connector.send_message(user_prompt)
     """
 
     def __init__(self):
         self._prompt_builder = PromptBuilder()
         self.session_turns: list[Turn] = []
+        self._session_started: bool = False
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def build_prompt(
+    def get_system_prompt(self) -> str:
+        """Return the full system prompt. Call once at session start."""
+        return self._prompt_builder.get_system_prompt()
+
+    def build_seed_prompt(
         self,
-        n_turns: int = DEFAULT_TURNS,
         selected_persona: str | None = None,
         selected_pacing: str | None = None,
-    ) -> dict[str, str]:
+    ) -> str:
         """
-        Return prompt data ready to send to the model and display to the user.
-
-        The returned dict contains:
-            - system_prompt: full persona/rules document
-            - user_prompt: diversity seeds + session history
-            - persona: the mood selected for this generation
-            - pacing: the pacing strategy selected for this generation
+        Build the FIRST user message that sets up the session.
+        Includes persona, pacing, and opening pattern — sent once.
         """
-        return self._prompt_builder.build(
-            session_turns=self.session_turns,
-            n_turns=n_turns,
+        return self._prompt_builder.build_session_seed_prompt(
             selected_persona=selected_persona,
             selected_pacing=selected_pacing,
+        )
+
+    def build_turn_prompt(
+        self,
+        n_turns: int = DEFAULT_TURNS,
+        device_state=None,
+        user_event: str | None = None,
+    ) -> str:
+        """
+        Build a minimal user prompt for a stateful session.
+        Only includes fresh context that changes each turn.
+        """
+        return self._prompt_builder.build_user_prompt(
+            session_turns=self.session_turns,
+            n_turns=n_turns,
+            device_state=device_state,
+            user_event=user_event,
         )
 
     def record_turns(self, turns: list[Turn]) -> None:
@@ -71,6 +92,7 @@ class Brain:
     def clear_session(self) -> None:
         """Reset session history (start fresh)."""
         self.session_turns = []
+        self._session_started = False
         log.info("Session cleared.")
 
     def session_summary(self) -> dict:
@@ -95,4 +117,4 @@ class Brain:
     @property
     def current_pacing(self) -> str | None:
         """The pacing strategy used in the most recent build_prompt() call."""
-        return self._prompt_builder.current_pacing
+        return self._prompt_builder.current_pacing  

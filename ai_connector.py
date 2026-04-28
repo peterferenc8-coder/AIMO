@@ -3,12 +3,8 @@ ai_connector.py
 ---------------
 Thin wrappers around Google and Groq Generative AI APIs.
 
-Responsibilities:
-    - POST a prompt to Google's GenerativeAI API (non-streaming).
-    - POST a prompt to Groq's OpenAI-compatible API (non-streaming).
-    - Handle authentication errors, rate limits, and timeouts gracefully.
-    - Log raw JSON responses to timestamped files for later inspection.
-    - Expose a health-check method so the UI can show connection status.
+Now stateful: system prompt is set once per session, then only
+new user messages are sent each turn.
 """
 
 import json
@@ -51,6 +47,10 @@ class BaseAIConnector:
         self._last_api_message: str = "Not validated yet"
         self._last_api_checked_at: str | None = None
 
+        # Session state
+        self._session_active: bool = False
+        self._system_prompt: str = ""
+
         self.reconfigure(api_key=api_key, model=model, timeout=timeout)
 
     def reconfigure(
@@ -68,22 +68,16 @@ class BaseAIConnector:
             self.timeout = timeout
 
     def health_check(self) -> dict[str, Any]:
-        """
-        Return cached connection status.
-
-        Safe to call frequently – used by the UI status indicator.
-        Does NOT trigger a fresh API call.
-        """
         configured = self._is_configured()
         return {
             "ok": False if not configured else (True if self._last_api_ok is None else self._last_api_ok),
             "message": "API key not configured" if not configured else self._last_api_message,
             "model": self.model,
             "checked_at": self._last_api_checked_at,
+            "session_active": self._session_active,
         }
 
     def validate_api_key(self) -> dict[str, Any]:
-        """Perform a minimal request to verify the configured API key."""
         if not self._is_configured():
             self._mark_unhealthy(ValueError("API key not configured"))
             return self.health_check()
@@ -96,22 +90,82 @@ class BaseAIConnector:
 
         return self.health_check()
 
+    # ── Session management ────────────────────────────────────────────────────
+
+    def start_session(self, system_prompt: str) -> None:
+        """
+        Start a new chat session with the given system prompt.
+        This is called once at the beginning of a session.
+        """
+        self._system_prompt = system_prompt
+        self._session_active = True
+        self._start_chat_session(system_prompt)
+        log.info("Started new chat session (%d chars system prompt)", len(system_prompt))
+
+    def end_session(self) -> None:
+        """End the current session and clear state."""
+        self._session_active = False
+        self._system_prompt = ""
+        self._end_chat_session()
+        log.info("Ended chat session")
+
+    def send_message(self, user_prompt: str, model: str | None = None) -> str:
+        """
+        Send a user message in the current session.
+        Must call start_session() first.
+        """
+        if not self._session_active:
+            raise RuntimeError("No active session. Call start_session() first.")
+
+        selected_model = model or self.model
+        self.model = selected_model
+
+        log.debug(
+            "Sending message in session  model=%s  user_chars=%d",
+            selected_model,
+            len(user_prompt),
+        )
+
+        try:
+            response = self._send_chat_message(user_prompt, selected_model)
+            self._write_response_log(
+                {
+                    "system_prompt": self._system_prompt,
+                    "user_prompt": user_prompt,
+                    "response": response,
+                }
+            )
+            self._mark_healthy()
+            return response
+
+        except Exception as exc:
+            self._mark_unhealthy(exc)
+            raise RuntimeError(f"{self.__class__.__name__} error: {str(exc)[:300]}") from exc
+
+    # ── Abstract methods ──────────────────────────────────────────────────────
+
+    def _start_chat_session(self, system_prompt: str) -> None:
+        raise NotImplementedError
+
+    def _end_chat_session(self) -> None:
+        raise NotImplementedError
+
+    def _send_chat_message(self, user_prompt: str, model: str) -> str:
+        raise NotImplementedError
+
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _mark_healthy(self) -> None:
-        """Update cached status after a successful call."""
         self._last_api_ok = True
         self._last_api_message = "Connected"
         self._last_api_checked_at = datetime.now(timezone.utc).isoformat()
 
     def _mark_unhealthy(self, exc: Exception) -> None:
-        """Update cached status after a failed call."""
         self._last_api_ok = False
         self._last_api_message = str(exc)[:100]
         self._last_api_checked_at = datetime.now(timezone.utc).isoformat()
 
     def _write_response_log(self, log_data: dict[str, Any]) -> None:
-        """Persist the prompt and output as a timestamped JSON file."""
         try:
             self.response_log_dir.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%fZ")
@@ -137,12 +191,8 @@ class BaseAIConnector:
 
 class GoogleAIConnector(BaseAIConnector):
     """
-    Talks to Google's Generative AI API (Gemini/Gemma models).
-
-    Usage::
-
-        connector = GoogleAIConnector()
-        raw_text = connector.generate(system_prompt, user_prompt)
+    Talks to Google's Generative AI API (Gemini/Gemma models) using
+    stateful chat sessions.
     """
 
     def __init__(
@@ -152,6 +202,7 @@ class GoogleAIConnector(BaseAIConnector):
         timeout: int = GOOGLE_TIMEOUT,
     ):
         self.client = None
+        self._chat_session = None
         super().__init__(
             api_key=api_key,
             model=model,
@@ -165,133 +216,74 @@ class GoogleAIConnector(BaseAIConnector):
         model: str | None = None,
         timeout: int | None = None,
     ) -> None:
-        """Update connection settings in place without replacing callers."""
         super().reconfigure(api_key=api_key, model=model, timeout=timeout)
         if api_key is not None:
             self.client = genai.Client(api_key=self.api_key) if self.api_key else None
-
-    def generate(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        model: str | None = None,
-    ) -> str:
-        """
-        Send a generate request to Google AI and return the model's
-        response text.
-
-        Raises:
-            RuntimeError: On any API error so callers can display a
-                meaningful message without catching SDK internals.
-        """
-        if self.client is None:
-            raise RuntimeError("Google AI API key is not configured")
-
-        selected_model = model or self.model
-        self.model = selected_model
-
-        log.debug(
-            "Calling Google AI  model=%s  prompt_chars=%d",
-            selected_model,
-            len(user_prompt),
-        )
-
-        try:
-            response = self._call_api(system_prompt, user_prompt, selected_model)
-            thinking, text = self._extract_content(response)
-
-            self._write_response_log(
-                {
-                    "system_prompt": system_prompt,
-                    "user_prompt": user_prompt,
-                    "thinking": thinking,
-                    "text": text,
-                }
-            )
-
-            self._mark_healthy()
-            log.debug("Received %d chars from model", len(text))
-            return text
-
-        except Exception as exc:
-            self._mark_unhealthy(exc)
-            raise RuntimeError(
-                f"Google AI API error: {str(exc)[:300]}"
-            ) from exc
 
     def _is_configured(self) -> bool:
         return self.client is not None
 
     def _do_validation_call(self) -> None:
-        self._call_api("", "ping", self.model)
+        # Quick validation: generate a single token
+        self.client.models.generate_content(
+            model=f"models/{self.model}",
+            contents="ping",
+            config=genai.types.GenerateContentConfig(
+                max_output_tokens=1,
+            ),
+        )
 
-    def _call_api(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        model: str,
-    ) -> Any:
-        """Execute the actual SDK call. Compatible with Gemma and Gemini."""
-        if system_prompt and system_prompt.strip():
-            full_prompt = f"{system_prompt.strip()}\n\n{user_prompt}"
-        else:
-            full_prompt = user_prompt
+    def _start_chat_session(self, system_prompt: str) -> None:
+        if self.client is None:
+            raise RuntimeError("Google AI API key is not configured")
 
         generation_config = genai.types.GenerateContentConfig(
             temperature=GENERATION_OPTIONS.get("temperature", 1.0),
             top_p=GENERATION_OPTIONS.get("top_p", 0.95),
             top_k=GENERATION_OPTIONS.get("top_k", 60),
+            system_instruction=system_prompt,  # Set once, persists for session
             thinking_config=genai.types.ThinkingConfig(
                 include_thoughts=False,
                 thinking_level="minimal",
             ),
         )
 
-        return self.client.models.generate_content(
-            model=f"models/{model}",
-            contents=full_prompt,
+        self._chat_session = self.client.chats.create(
+            model=f"models/{self.model}",
             config=generation_config,
         )
 
-    @staticmethod
-    def _extract_content(response: Any) -> tuple[str, str]:
-        """
-        Pull both thinking and final text out of the Google API response.
+    def _end_chat_session(self) -> None:
+        self._chat_session = None
 
-        Returns:
-            (thinking, text)
-        """
+    def _send_chat_message(self, user_prompt: str, model: str) -> str:
+        response = self._chat_session.send_message(user_prompt)
+        return self._extract_text(response)
+
+    @staticmethod
+    def _extract_text(response: Any) -> str:
         response_dict = response.model_dump()
         candidates = response_dict.get("candidates", [])
         if not candidates:
-            return "", ""
+            return ""
 
         candidate = candidates[0]
         content = candidate.get("content", {})
         parts = content.get("parts", [])
 
-        thinking = ""
-        text = ""
-
         for part in parts:
-            if part.get("thought") is True and part.get("text"):
-                thinking = part["text"]
-            elif part.get("thought") is not True and part.get("text"):
-                text = part["text"]
+            if part.get("thought") is not True and part.get("text"):
+                return part["text"]
 
-        return thinking, text
+        return ""
 
 
 # ── Groq ─────────────────────────────────────────────────────────────────────
 
 class GroqAIConnector(BaseAIConnector):
     """
-    Talks to Groq's OpenAI-compatible API.
-
-    Usage::
-
-        connector = GroqAIConnector()
-        raw_text = connector.generate(system_prompt, user_prompt)
+    Talks to Groq's OpenAI-compatible API using stateful chat sessions.
+    Maintains the messages array internally.
     """
 
     def __init__(
@@ -302,6 +294,7 @@ class GroqAIConnector(BaseAIConnector):
     ):
         self.base_url = "https://api.groq.com/openai/v1/chat/completions"
         self.models_url = "https://api.groq.com/openai/v1/models"
+        self._messages: list[dict[str, str]] = []
         super().__init__(
             api_key=api_key,
             model=model,
@@ -309,59 +302,42 @@ class GroqAIConnector(BaseAIConnector):
             log_dir_name="groq_api_responses",
         )
 
-    def generate(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        model: str | None = None,
-    ) -> str:
-        """
-        Send a completion request to Groq and return the model's response text.
-
-        Raises:
-            RuntimeError: On any API error so callers can display a
-                meaningful message without catching transport internals.
-        """
-        if not self.api_key:
-            raise RuntimeError("Groq API key is not configured")
-
-        selected_model = model or self.model
-        self.model = selected_model
-
-        payload = {
-            "model": selected_model,
-            "messages": [
-                {"role": "system", "content": system_prompt or ""},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": GENERATION_OPTIONS.get("temperature", 1.0),
-            "top_p": GENERATION_OPTIONS.get("top_p", 0.95),
-        }
-
-        try:
-            response_data = self._call_api(payload)
-            text = self._extract_text(response_data)
-
-            self._write_response_log(
-                {
-                    "system_prompt": system_prompt,
-                    "user_prompt": user_prompt,
-                    "text": text,
-                    "raw": response_data,
-                }
-            )
-
-            self._mark_healthy()
-            return text
-        except Exception as exc:
-            self._mark_unhealthy(exc)
-            raise RuntimeError(f"Groq API error: {str(exc)[:300]}") from exc
-
     def _is_configured(self) -> bool:
         return bool(self.api_key)
 
     def _do_validation_call(self) -> None:
         self._call_models()
+
+    def _start_chat_session(self, system_prompt: str) -> None:
+        self._messages = [
+            {"role": "system", "content": system_prompt},
+        ]
+
+    def _end_chat_session(self) -> None:
+        self._messages = []
+
+    def _send_chat_message(self, user_prompt: str, model: str) -> str:
+        self._messages.append({"role": "user", "content": user_prompt})
+
+        payload = {
+            "model": model,
+            "messages": self._messages,
+            "temperature": GENERATION_OPTIONS.get("temperature", 1.0),
+            "top_p": GENERATION_OPTIONS.get("top_p", 0.95),
+        }
+
+        response_data = self._call_api(payload)
+        text = self._extract_text(response_data)
+
+        # Append assistant response to history for continuity
+        self._messages.append({"role": "assistant", "content": text})
+
+        # Trim history if it gets too long (keep last 20 turns)
+        # System prompt + last 20 user/assistant pairs = ~41 messages max
+        if len(self._messages) > 41:
+            self._messages = [self._messages[0]] + self._messages[-40:]
+
+        return text
 
     def _call_api(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
