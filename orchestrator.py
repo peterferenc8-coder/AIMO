@@ -182,6 +182,48 @@ class SessionOrchestrator:
                 self.big_connector = self._connector_for_model(model)
                 self.big_connector.model = model
 
+        # ── START SESSION: send system prompt once ─────────────────────────
+        try:
+            system_prompt = self.brain.get_system_prompt()
+            self.big_connector.start_session(system_prompt)
+            log.info("Started chat session with %s", self.big_connector.model)
+
+            # Send the seed prompt (persona, pacing, opening pattern)
+            seed_prompt = self.brain.build_seed_prompt(
+                selected_persona=resolved_persona,
+                selected_pacing=resolved_pacing,
+            )
+            raw_text = self.big_connector.send_message(seed_prompt)
+            turns = self.parser.parse(raw_text)
+
+            if turns:
+                self.brain.record_turns(turns)
+                self.session.add_turns(turns)
+
+                with self.lock:
+                    for turn in turns:
+                        self._pending.append(
+                            DisplayItem(
+                                source="big",
+                                speech=turn.speech,
+                                commands=turn.commands.as_dict(),
+                                raw=turn.raw,
+                            )
+                        )
+                log.info("Seed prompt returned %d turns", len(turns))
+            else:
+                log.warning("Seed prompt returned no parseable turns")
+
+        except Exception as exc:
+            log.error("Failed to start session: %s", exc)
+            with self.lock:
+                self.state = "idle"
+            return {
+                "ok": False,
+                "error": f"Failed to start session: {exc}",
+                "state": "idle",
+            }
+
         log.info(
             "Session started  turns=%d  persona=%s  pacing=%s  big_model=%s",
             self.HIGH_WATERMARK,
@@ -225,6 +267,13 @@ class SessionOrchestrator:
             self.session.clear()
             self.brain.clear_session()
             self._big_in_flight = False
+            
+            # End the chat session
+            try:
+                self.big_connector.end_session()
+            except Exception as exc:
+                log.warning("Error ending session: %s", exc)
+                
             log.info("Session cleared")
         return self.status
 
@@ -319,11 +368,6 @@ class SessionOrchestrator:
                     self._consecutive_failures = 0
                 time.sleep(self.GENERATOR_SLEEP)
 
-    def _handle_big_failure(self, reason: str) -> None:
-        with self.lock:
-            self._consecutive_failures += 1
-        log.warning("Big model failed (%s). Failure #%d. Backoff increasing.", reason, self._consecutive_failures)
-
     # ── Big model worker ────────────────────────────────────────────────────
 
     def _request_big_model(self) -> None:
@@ -344,20 +388,17 @@ class SessionOrchestrator:
     def _big_model_worker(self) -> None:
         """
         Generates one batch of HIGH_WATERMARK turns and appends to the buffer.
-        Does NOT chain another request — the generator loop handles that.
+        Uses stateful chat: only sends minimal user prompt, not full system prompt.
         """
         try:
-            prompt_data = self.brain.build_prompt(
+            # Build minimal user prompt with fresh context only
+            user_prompt = self.brain.build_turn_prompt(
                 n_turns=self.HIGH_WATERMARK,
-                selected_persona=self._persona,
-                selected_pacing=self._pacing,
+                device_state=self.session.device_state,
             )
 
-            raw_text = self.big_connector.generate(
-                system_prompt=prompt_data["system_prompt"],
-                user_prompt=prompt_data["user_prompt"],
-                model=self.big_connector.model,
-            )
+            # Send message in existing session (system prompt already set)
+            raw_text = self.big_connector.send_message(user_prompt)
 
             turns = self.parser.parse(raw_text)
 
@@ -395,9 +436,9 @@ class SessionOrchestrator:
                 self._big_in_flight = False
 
     def _handle_big_failure(self, reason: str) -> None:
-        log.warning("Big model failed (%s). Will retry via generator loop.", reason)
-        # The generator loop will notice buffer is still low and retry
-        # after its sleep interval. No manual timer needed.
+        with self.lock:
+            self._consecutive_failures += 1
+        log.warning("Big model failed (%s). Failure #%d. Backoff increasing.", reason, self._consecutive_failures)
 
     # ── Helpers ─────────────────────────────────────────────────────────────
 
