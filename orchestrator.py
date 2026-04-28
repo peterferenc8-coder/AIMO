@@ -99,7 +99,7 @@ class SessionOrchestrator:
         self.session = SessionManager()
         self.prompt_builder = PromptBuilder()
 
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
         self.state = "idle"
 
@@ -313,14 +313,13 @@ class SessionOrchestrator:
         Applies device commands and records the display.
         """
         while True:
+            should_sleep = False
             with self.lock:
                 if self.state == "idle":
                     break
                 if self.state == "paused":
-                    time.sleep(0.5)
-                    continue
-
-                if self._pending:
+                    should_sleep = True
+                elif self._pending:
                     item = self._pending.pop(0)
                     item.index = self._display_index
                     self._display_index += 1
@@ -335,7 +334,10 @@ class SessionOrchestrator:
                         len(self._pending),
                     )
 
-            time.sleep(self.DISPLAY_INTERVAL)
+            if should_sleep:
+                time.sleep(0.5)
+            else:
+                time.sleep(self.DISPLAY_INTERVAL)
 
     # ── Generator loop (producer) ─────────────────────────────────────────
 
@@ -343,20 +345,25 @@ class SessionOrchestrator:
         max_backoff = 60.0
         
         while True:
+            should_sleep_paused = False
+            should_generate = False
+            buffer_depth = 0
+            
             with self.lock:
                 if self.state == "idle":
                     break
                 if self.state == "paused":
-                    time.sleep(1.0)
-                    continue
-
-                buffer_depth = len(self._pending)
-                should_generate = (
-                    buffer_depth <= self.LOW_WATERMARK
-                    and not self._big_in_flight
-                )
-
-            if should_generate:
+                    should_sleep_paused = True
+                else:
+                    buffer_depth = len(self._pending)
+                    should_generate = (
+                        buffer_depth <= self.LOW_WATERMARK
+                        and not self._big_in_flight
+                    )
+            
+            if should_sleep_paused:
+                time.sleep(1.0)
+            elif should_generate:
                 log.info("Buffer low (%d <= %d) — requesting big model", buffer_depth, self.LOW_WATERMARK)
                 self._request_big_model()
                 

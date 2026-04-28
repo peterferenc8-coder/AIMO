@@ -2,8 +2,10 @@ let pollHandle = null;
 let displayIndex = 0;
 let isRunning = false;
 let startTime = null;
+let totalElapsedTime = 0; // Track total elapsed time across pause/resume
 let timerInterval = null;
 let lastDisplayedSpeech = '';
+let currentPattern = null; // Track the current pattern for resume
 
 const typingQueue = [];
 let isTyping = false;
@@ -13,16 +15,21 @@ function startTimer() {
   startTime = Date.now();
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = setInterval(() => {
-    document.getElementById('ai-timer').textContent = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+    const elapsed = totalElapsedTime + (Date.now() - startTime);
+    document.getElementById('ai-timer').textContent = (elapsed / 1000).toFixed(1) + 's';
   }, 100);
 }
 function stopTimer() {
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = null;
+  if (startTime !== null) {
+    totalElapsedTime += Date.now() - startTime;
+    startTime = null;
+  }
 }
 function resetTimer() {
   stopTimer();
-  startTime = null;
+  totalElapsedTime = 0;
   document.getElementById('ai-timer').textContent = '';
 }
 
@@ -91,7 +98,10 @@ function makeAICard(item) {
 }
 
 function updateParamChips(cmds) {
-  if (cmds.pattern) document.getElementById('ai-param-pattern').textContent = cmds.pattern;
+  if (cmds.pattern) {
+    document.getElementById('ai-param-pattern').textContent = cmds.pattern;
+    currentPattern = cmds.pattern;
+  }
   if (cmds.speed !== null && cmds.speed !== undefined) document.getElementById('ai-param-speed').textContent = cmds.speed + '%';
   if (cmds.depth !== null && cmds.depth !== undefined) document.getElementById('ai-param-depth').textContent = cmds.depth + '%';
   if (cmds.base !== null && cmds.base !== undefined) document.getElementById('ai-param-base').textContent = cmds.base + '%';
@@ -133,14 +143,18 @@ function updateAIStatus(state) {
   el.className = '';
   el.textContent = state;
   el.classList.add(`status-${state}`);
-  document.getElementById('ai-start').disabled = state === 'running' || state === 'buffering';
+  document.getElementById('ai-start').disabled = state !== 'idle';
   document.getElementById('ai-pause').disabled = state !== 'running';
   document.getElementById('ai-resume').disabled = state !== 'paused';
+  document.getElementById('ai-stop').disabled = state === 'idle';
 }
 
 function setAILoading(on) {
   document.getElementById('ai-spinner').style.display = on ? 'block' : 'none';
   document.getElementById('ai-start').disabled = on;
+  document.getElementById('ai-pause').disabled = on;
+  document.getElementById('ai-resume').disabled = on;
+  document.getElementById('ai-stop').disabled = on;
 }
 
 function clearAIStream() {
@@ -197,6 +211,7 @@ document.getElementById('ai-start').addEventListener('click', async () => {
 
     isRunning = true;
     displayIndex = 0;
+    currentPattern = null;
     startTimer();
     updateAIStatus(data.state || 'running');
     clearAIStream();
@@ -214,30 +229,84 @@ document.getElementById('ai-pause').addEventListener('click', async () => {
     const data = await res.json();
     updateAIStatus(data.state);
     isRunning = data.state === 'running';
+    stopTimer();
+    
+    // Send device stop command - don't block on this
+    try {
+      window.App.sendDeviceCmd({ cmd: 'stop' });
+    } catch (deviceErr) {
+      console.error('Device command failed:', deviceErr);
+    }
   } catch (err) {
     window.App.showError('Pause failed: ' + err.message);
+    updateAIStatus('idle');
   }
 });
 
 document.getElementById('ai-resume').addEventListener('click', async () => {
+  console.log('Resume clicked');
   try {
-    const res = await fetch('/api/resume', { method: 'POST' });
+    console.log('Fetching /api/resume');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    
+    const res = await fetch('/api/resume', { 
+      method: 'POST',
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    console.log('Resume response received:', res.status);
+    
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    
     const data = await res.json();
+    console.log('Resume response data:', data);
     updateAIStatus(data.state);
     isRunning = data.state === 'running';
+    if (isRunning) {
+      startTimer();
+      
+      // Restart the pattern if one is active
+      if (currentPattern) {
+        try {
+          window.App.sendDeviceCmd({ cmd: 'startPattern' });
+        } catch (deviceErr) {
+          console.error('Device command failed on resume:', deviceErr);
+        }
+      }
+    }
   } catch (err) {
+    console.error('Resume error:', err);
     window.App.showError('Resume failed: ' + err.message);
+    updateAIStatus('idle');
   }
 });
 
-document.getElementById('ai-clear').addEventListener('click', async () => {
-  await fetch('/api/clear', { method: 'POST' });
-  isRunning = false;
-  if (pollHandle) clearInterval(pollHandle);
-  pollHandle = null;
-  clearAIStream();
-  resetTimer();
-  window.App.hideError();
-  updateAIStatus('idle');
-  displayIndex = 0;
+document.getElementById('ai-stop').addEventListener('click', async () => {
+  try {
+    await fetch('/api/clear', { method: 'POST' });
+    isRunning = false;
+    if (pollHandle) clearInterval(pollHandle);
+    pollHandle = null;
+    clearAIStream();
+    resetTimer();
+    window.App.hideError();
+    displayIndex = 0;
+    currentPattern = null;
+    
+    // Send device stop command
+    try {
+      window.App.sendDeviceCmd({ cmd: 'stop' });
+    } catch (deviceErr) {
+      console.error('Device command failed on stop:', deviceErr);
+    }
+    
+    updateAIStatus('idle');
+  } catch (err) {
+    window.App.showError('Stop failed: ' + err.message);
+    updateAIStatus('idle');
+  }
 });
