@@ -1,11 +1,17 @@
 """
 orchestrator.py
 ---------------
-Manages the dual-model generation flow:
-  - Big model: slow, full turns with commands (buffer generation)
-  - Small model: fast, speech-only filler while big model warms up
+Producer-consumer session orchestrator.
 
-Handles timing, pause/resume, and the display queue.
+  - Producer (generator loop): Monitors buffer depth. When it drops below
+    the low watermark, fires the big model to fill back to high watermark.
+    Sleeps otherwise. No small model.
+
+  - Consumer (display loop): Pops one item from the buffer every N seconds,
+    applies device commands, and appends to the displayed stream. Never waits
+    for a model. Steady clock.
+
+  - Frontend poll(): Read-only. Returns newly displayed items since last call.
 """
 
 import logging
@@ -18,12 +24,15 @@ from typing import Any
 from device_bridge import get_bridge
 
 from config import (
+    BIG_MODEL_RETRY_DELAY,
     DEFAULT_TURNS,
+    DISPLAY_INTERVAL,
+    GENERATOR_SLEEP,
     GROQ_MODEL_OPTIONS,
+    HIGH_WATERMARK,
+    LOW_WATERMARK,
     MODEL_OPTIONS,
     SMALL_MODEL,
-    SMALL_MODEL_MAX_INTERVAL,
-    SMALL_MODEL_MIN_INTERVAL,
 )
 from ai_connector import GoogleAIConnector, GroqAIConnector
 from brain import Brain
@@ -37,7 +46,7 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class DisplayItem:
-    source: str  # "small" | "big"
+    source: str  # "big"
     speech: str
     commands: dict = field(default_factory=dict)
     raw: Any = None
@@ -55,8 +64,15 @@ class DisplayItem:
 
 class SessionOrchestrator:
     """
-    Coordinates big-model buffering with small-model filler speech.
+    Producer-consumer orchestrator with watermark-based backpressure.
     """
+
+    # ── Watermark & timing settings (from config, overridable via env) ─────
+    DISPLAY_INTERVAL = DISPLAY_INTERVAL
+    LOW_WATERMARK = LOW_WATERMARK
+    HIGH_WATERMARK = HIGH_WATERMARK
+    GENERATOR_SLEEP = GENERATOR_SLEEP
+    RETRY_DELAY = BIG_MODEL_RETRY_DELAY
 
     def __init__(self):
         self._settings = load_settings()
@@ -87,22 +103,27 @@ class SessionOrchestrator:
 
         self.state = "idle"
 
+        # Buffer: pending items waiting to be displayed
         self._pending: list[DisplayItem] = []
+        # Already-displayed items (for frontend poll)
         self._displayed: list[DisplayItem] = []
         self._display_index = 0
+        self._consecutive_failures = 0
 
-        self._last_display_time = 0.0
-        self._next_interval = 15.0
-
-        self._small_timer: threading.Timer | None = None
+        # Threads
+        self._display_thread: threading.Thread | None = None
+        self._generator_thread: threading.Thread | None = None
         self._big_thread: threading.Thread | None = None
-        self._small_in_flight = False
+        self._big_in_flight = False
 
+        # Session params
         self._n_turns = DEFAULT_TURNS
         self._persona: str | None = None
         self._pacing: str | None = None
 
         self.device_bridge = get_bridge()
+
+    # ── Settings & lifecycle ────────────────────────────────────────────────
 
     def apply_settings(self, settings: dict[str, str]) -> dict[str, str]:
         """Update live connectors and prompt assets from saved settings."""
@@ -147,16 +168,12 @@ class SessionOrchestrator:
 
         with self.lock:
             self.state = "running"
-            self._n_turns = n_turns
+            self._n_turns = self.HIGH_WATERMARK
             self._persona = resolved_persona
             self._pacing = resolved_pacing
             self._pending.clear()
             self._displayed.clear()
             self._display_index = 0
-            self._last_display_time = time.time()
-            self._next_interval = random.randint(
-                SMALL_MODEL_MIN_INTERVAL, SMALL_MODEL_MAX_INTERVAL
-            )
 
             self.session.clear()
             self.brain.clear_session()
@@ -167,14 +184,21 @@ class SessionOrchestrator:
 
         log.info(
             "Session started  turns=%d  persona=%s  pacing=%s  big_model=%s",
-            n_turns,
+            self.HIGH_WATERMARK,
             resolved_persona,
             resolved_pacing,
             self.big_connector.model,
         )
 
-        self._schedule_small()
-        self._request_big_model()
+        # Start the two independent loops
+        self._display_thread = threading.Thread(
+            target=self._display_loop, daemon=True, name="display"
+        )
+        self._generator_thread = threading.Thread(
+            target=self._generator_loop, daemon=True, name="generator"
+        )
+        self._display_thread.start()
+        self._generator_thread.start()
 
         return self.status
 
@@ -182,7 +206,6 @@ class SessionOrchestrator:
         with self.lock:
             if self.state == "running":
                 self.state = "paused"
-                self._cancel_small_timer()
                 log.info("Session paused")
         return self.status
 
@@ -190,71 +213,25 @@ class SessionOrchestrator:
         with self.lock:
             if self.state == "paused":
                 self.state = "running"
-                self._last_display_time = time.time()
-                self._next_interval = random.randint(
-                    SMALL_MODEL_MIN_INTERVAL, SMALL_MODEL_MAX_INTERVAL
-                )
                 log.info("Session resumed")
-
-        with self.lock:
-            has_big_pending = any(i.source == "big" for i in self._pending)
-            has_big_in_flight = (
-                self._big_thread is not None and self._big_thread.is_alive()
-            )
-
-        if not has_big_pending and not has_big_in_flight:
-            self._schedule_small()
-
         return self.status
 
     def clear(self) -> dict:
         with self.lock:
             self.state = "idle"
-            self._cancel_small_timer()
             self._pending.clear()
             self._displayed.clear()
             self._display_index = 0
             self.session.clear()
             self.brain.clear_session()
+            self._big_in_flight = False
             log.info("Session cleared")
         return self.status
 
+    # ── Poll: read-only, returns newly displayed items ──────────────────────
+
     def poll(self, since_index: int = 0) -> dict:
-        need_small_restart = False
-
         with self.lock:
-            if self.state == "running" and self._pending:
-                now = time.time()
-                if now - self._last_display_time >= self._next_interval:
-                    item = self._pop_next_item()
-                    if item:
-                        item.index = self._display_index
-                        self._display_index += 1
-                        self._displayed.append(item)
-                        if item.source == "big" and item.commands:
-                            self.device_bridge.apply_ai_commands(item.commands)
-                        self._last_display_time = now
-                        self._next_interval = random.randint(
-                            SMALL_MODEL_MIN_INTERVAL, SMALL_MODEL_MAX_INTERVAL
-                        )
-                        log.debug(
-                            "Displayed item %d  source=%s",
-                            item.index,
-                            item.source,
-                        )
-
-            if self.state == "running":
-                has_big_pending = any(i.source == "big" for i in self._pending)
-                has_big_in_flight = (
-                    self._big_thread is not None and self._big_thread.is_alive()
-                )
-                if (
-                    not has_big_pending
-                    and not has_big_in_flight
-                    and self._small_timer is None
-                ):
-                    need_small_restart = True
-
             new_items = self._displayed[since_index:]
             return {
                 "ok": True,
@@ -263,9 +240,6 @@ class SessionOrchestrator:
                 "state": self.state,
                 "pending_count": len(self._pending),
             }
-
-        if need_small_restart:
-            self._schedule_small()
 
     @property
     def status(self) -> dict:
@@ -282,123 +256,99 @@ class SessionOrchestrator:
                 "pacing": self._pacing,
             }
 
-    @staticmethod
-    def _is_google_model(model: str) -> bool:
-        return model in MODEL_OPTIONS
+    # ── Display loop (consumer) ─────────────────────────────────────────────
 
-    @staticmethod
-    def _is_groq_model(model: str) -> bool:
-        return model in GROQ_MODEL_OPTIONS
+    def _display_loop(self) -> None:
+        """
+        Steady clock: pop one item from the buffer every DISPLAY_INTERVAL seconds.
+        Applies device commands and records the display.
+        """
+        while True:
+            with self.lock:
+                if self.state == "idle":
+                    break
+                if self.state == "paused":
+                    time.sleep(0.5)
+                    continue
 
-    def _connector_for_model(self, model: str):
-        if self._is_groq_model(model):
-            return self.groq_connector
-        return self.google_connector
+                if self._pending:
+                    item = self._pending.pop(0)
+                    item.index = self._display_index
+                    self._display_index += 1
+                    self._displayed.append(item)
 
-    def _schedule_small(self) -> None:
+                    if item.commands:
+                        self.device_bridge.apply_ai_commands(item.commands)
+
+                    log.debug(
+                        "Displayed item %d  pending=%d",
+                        item.index,
+                        len(self._pending),
+                    )
+
+            time.sleep(self.DISPLAY_INTERVAL)
+
+    # ── Generator loop (producer) ─────────────────────────────────────────
+
+    def _generator_loop(self) -> None:
+        max_backoff = 60.0
+        
+        while True:
+            with self.lock:
+                if self.state == "idle":
+                    break
+                if self.state == "paused":
+                    time.sleep(1.0)
+                    continue
+
+                buffer_depth = len(self._pending)
+                should_generate = (
+                    buffer_depth <= self.LOW_WATERMARK
+                    and not self._big_in_flight
+                )
+
+            if should_generate:
+                log.info("Buffer low (%d <= %d) — requesting big model", buffer_depth, self.LOW_WATERMARK)
+                self._request_big_model()
+                
+                # Adaptive wait: longer after each failure
+                backoff = min(5.0 * (2 ** self._consecutive_failures), max_backoff)
+                time.sleep(backoff)
+            else:
+                with self.lock:
+                    self._consecutive_failures = 0
+                time.sleep(self.GENERATOR_SLEEP)
+
+    def _handle_big_failure(self, reason: str) -> None:
         with self.lock:
-            if self.state != "running":
-                return
+            self._consecutive_failures += 1
+        log.warning("Big model failed (%s). Failure #%d. Backoff increasing.", reason, self._consecutive_failures)
 
-            # Keep only one scheduling lane for the small model.
-            if self._small_in_flight:
-                return
-            if self._small_timer is not None and self._small_timer.is_alive():
-                return
-
-            interval = random.randint(
-                SMALL_MODEL_MIN_INTERVAL, SMALL_MODEL_MAX_INTERVAL
-            )
-            timer = threading.Timer(interval, self._small_tick)
-            timer.daemon = True
-            self._small_timer = timer
-
-        timer.start()
-        log.debug("Small model scheduled in %ds", interval)
-
-    def _small_tick(self) -> None:
-        with self.lock:
-            # Timer fired; clear timer reference and enforce single-flight.
-            self._small_timer = None
-            if self.state != "running":
-                return
-            if self._small_in_flight:
-                log.debug("Small tick skipped: generation already in flight")
-                return
-            self._small_in_flight = True
-
-        if self.state != "running":
-            with self.lock:
-                self._small_in_flight = False
-            return
-
-        try:
-            prompt = self.prompt_builder.build_small_prompt(
-                session_turns=self.brain.session_turns,
-                device_state=self.session.device_state,
-                persona=self._persona,
-            )
-
-            speech = self.small_connector.generate(
-                system_prompt="",
-                user_prompt=prompt,
-                model=SMALL_MODEL,
-            ).strip()
-
-            if not speech:
-                log.warning("Small model returned empty speech")
-                self._schedule_small()
-                return
-
-            with self.lock:
-                recent_speeches = [
-                    item.speech for item in self._pending[-3:] + self._displayed[-3:]
-                ]
-                if speech in recent_speeches:
-                    log.debug("Duplicate speech rejected: %s", speech[:60])
-                    self._schedule_small()
-                    return
-
-            turn = Turn(
-                index=len(self.brain.session_turns),
-                speech=speech,
-                commands=Commands(),
-            )
-            self.brain.record_turns([turn])
-
-            item = DisplayItem(
-                source="small",
-                speech=speech,
-                raw={"speech": speech},
-            )
-
-            with self.lock:
-                self._pending.append(item)
-
-            log.debug("Small model speech queued (%d chars)", len(speech))
-
-        except Exception as exc:
-            log.error("Small model generation failed: %s", exc)
-
-        finally:
-            with self.lock:
-                self._small_in_flight = False
-            self._schedule_small()
+    # ── Big model worker ────────────────────────────────────────────────────
 
     def _request_big_model(self) -> None:
-        if self.state != "running":
-            log.debug("Skipping big model request — not running")
-            return
+        with self.lock:
+            if self.state != "running":
+                log.debug("Skipping big model request — not running")
+                return
+            if self._big_in_flight:
+                log.debug("Big model already in flight — skipping duplicate request")
+                return
+            self._big_in_flight = True
 
         self._big_thread = threading.Thread(
-            target=self._big_model_worker, daemon=True
+            target=self._big_model_worker, daemon=True, name="big-model"
         )
         self._big_thread.start()
 
     def _big_model_worker(self) -> None:
+        """
+        Generates one batch of HIGH_WATERMARK turns and appends to the buffer.
+        Does NOT chain another request — the generator loop handles that.
+        """
         try:
             prompt_data = self.brain.build_prompt(
-                n_turns=self._n_turns,
+                n_turns=self.HIGH_WATERMARK,
                 selected_persona=self._persona,
                 selected_pacing=self._pacing,
             )
@@ -429,7 +379,6 @@ class SessionOrchestrator:
                             raw=turn.raw,
                         )
                     )
-                self._cancel_small_timer()
 
             log.info(
                 "Big model returned %d turns  total_pending=%d",
@@ -437,47 +386,30 @@ class SessionOrchestrator:
                 len(self._pending),
             )
 
-            if self.state == "running":
-                self._request_big_model()
-            else:
-                log.info("Big model completed while paused — not chaining next request")
-
         except Exception as exc:
             log.error("Big model generation failed: %s", exc)
             self._handle_big_failure(str(exc))
 
+        finally:
+            with self.lock:
+                self._big_in_flight = False
+
     def _handle_big_failure(self, reason: str) -> None:
-        log.warning("Big model failed (%s). Restarting small model filler.", reason)
+        log.warning("Big model failed (%s). Will retry via generator loop.", reason)
+        # The generator loop will notice buffer is still low and retry
+        # after its sleep interval. No manual timer needed.
 
-        with self.lock:
-            has_any_pending = len(self._pending) > 0
-            small_timer_alive = (
-                self._small_timer is not None and self._small_timer.is_alive()
-            )
+    # ── Helpers ─────────────────────────────────────────────────────────────
 
-        if not has_any_pending and not small_timer_alive and self.state == "running":
-            self._schedule_small()
+    @staticmethod
+    def _is_google_model(model: str) -> bool:
+        return model in MODEL_OPTIONS
 
-        if self.state == "running":
-            log.info("Scheduling big model retry in 15s")
-            retry_timer = threading.Timer(15.0, self._request_big_model)
-            retry_timer.daemon = True
-            retry_timer.start()
+    @staticmethod
+    def _is_groq_model(model: str) -> bool:
+        return model in GROQ_MODEL_OPTIONS
 
-    def _pop_next_item(self) -> DisplayItem | None:
-        if not self._pending:
-            return None
-
-        first_big = next(
-            (i for i, item in enumerate(self._pending) if item.source == "big"),
-            None,
-        )
-        if first_big is not None and first_big > 0:
-            self._pending = self._pending[first_big:]
-
-        return self._pending.pop(0) if self._pending else None
-
-    def _cancel_small_timer(self) -> None:
-        if self._small_timer is not None:
-            self._small_timer.cancel()
-            self._small_timer = None
+    def _connector_for_model(self, model: str):
+        if self._is_groq_model(model):
+            return self.groq_connector
+        return self.google_connector
