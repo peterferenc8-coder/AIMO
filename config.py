@@ -39,11 +39,13 @@ SMALL_EXAMPLES_DIR = BASE_PROMPTS_DIR / "examples" / "small"
 
 # ── Small / Fast Filler Model ────────────────────────────────────────────────
 SMALL_MODEL = os.getenv("SMALL_MODEL", "gemma-3-12b-it")
-SMALL_MODEL_MIN_INTERVAL = int(os.getenv("SMALL_MIN_INTERVAL", "10"))
-SMALL_MODEL_MAX_INTERVAL = int(os.getenv("SMALL_MAX_INTERVAL", "20"))
+DISPLAY_INTERVAL = 12.0   # seconds between displayed turns
+LOW_WATERMARK = 3         # request more when buffer <= 3
+HIGH_WATERMARK = 10       # generate 10 turns per batch
+GENERATOR_SLEEP = 2.0     # seconds between buffer checks
 
 BIG_MODEL_MAX_RETRIES = int(os.getenv("BIG_MAX_RETRIES", "3"))
-BIG_MODEL_RETRY_DELAY = int(os.getenv("BIG_RETRY_DELAY", "15"))
+BIG_MODEL_RETRY_DELAY = int(os.getenv("BIG_RETRY_DELAY", "30"))
 
 
 # ── Google Generative AI (Gemini/Gemma) ─────────────────────────────────────

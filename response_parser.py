@@ -115,31 +115,47 @@ class ResponseParser:
         return text.strip()
 
     def _extract_json(self, text: str) -> Any:
-        """
-        Try several strategies to pull a valid JSON value out of text.
-
-        Order:
-          1. Direct parse of the whole string.
-          2. Find first balanced '[' … ']'.
-          3. Find first balanced '{' … '}'.
-        """
-        # Strategy 1: direct parse
+        # Strategy 1: direct parse (handles JSON array or single object)
         try:
             return json.loads(text)
         except json.JSONDecodeError:
             pass
 
-        # Strategy 2: find first balanced list
+        # Strategy 2: NDJSON — multiple {"action":...}\n{"action":...} lines
+        ndjson = self._extract_ndjson(text)
+        if ndjson is not None:
+            return ndjson
+
+        # Strategy 3: find first balanced list
         list_payload = self._extract_balanced(text, "[", "]")
         if list_payload is not None:
             return list_payload
 
-        # Strategy 3: find first balanced object
+        # Strategy 4: find first balanced object
         obj_payload = self._extract_balanced(text, "{", "}")
         if obj_payload is not None:
             return obj_payload
 
         return None
+
+    def _extract_ndjson(self, text: str) -> list[dict] | None:
+        """
+        Parse newline-delimited JSON objects: {..}\n{..}\n{..}
+        Returns a list of dicts, or None if no valid objects found.
+        """
+        objects: list[dict] = []
+        for line in text.strip().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                if isinstance(obj, dict):
+                    objects.append(obj)
+            except json.JSONDecodeError:
+                continue
+        
+        return objects if objects else None
 
     @staticmethod
     def _extract_balanced(text: str, open_char: str, close_char: str) -> Any:
