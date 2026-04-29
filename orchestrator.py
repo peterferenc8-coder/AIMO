@@ -8,8 +8,9 @@ Producer-consumer session orchestrator.
     Sleeps otherwise. No small model.
 
   - Consumer (display loop): Pops one item from the buffer every N seconds,
-    applies device commands, and appends to the displayed stream. Never waits
-    for a model. Steady clock.
+    applies device commands, synthesises speech via Kokoro TTS, and appends
+    to the displayed stream.  The frontend receives word-level timestamps
+    so it can highlight each word exactly when it is spoken.
 
   - Frontend poll(): Read-only. Returns newly displayed items since last call.
 """
@@ -40,6 +41,7 @@ from prompt_builder import PromptBuilder
 from response_parser import Commands, ResponseParser, Turn
 from session_manager import SessionManager
 from settings_store import load_settings
+import tts
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +53,10 @@ class DisplayItem:
     commands: dict = field(default_factory=dict)
     raw: Any = None
     index: int = 0
+    # ── TTS fields ────────────────────────────────────────────────────────
+    audio_url: str | None = None
+    words: list[dict] = field(default_factory=list)   # [{word, start_ms, end_ms}]
+    duration_ms: int = 0
 
     def as_dict(self) -> dict:
         return {
@@ -59,6 +65,9 @@ class DisplayItem:
             "commands": self.commands,
             "raw": self.raw,
             "index": self.index,
+            "audio_url": self.audio_url,
+            "words": self.words,
+            "duration_ms": self.duration_ms,
         }
 
 
@@ -203,12 +212,7 @@ class SessionOrchestrator:
                 with self.lock:
                     for turn in turns:
                         self._pending.append(
-                            DisplayItem(
-                                source="big",
-                                speech=turn.speech,
-                                commands=turn.commands.as_dict(),
-                                raw=turn.raw,
-                            )
+                            self._build_display_item(turn)
                         )
                 log.info("Seed prompt returned %d turns", len(turns))
             else:
@@ -267,13 +271,13 @@ class SessionOrchestrator:
             self.session.clear()
             self.brain.clear_session()
             self._big_in_flight = False
-            
+
             # End the chat session
             try:
                 self.big_connector.end_session()
             except Exception as exc:
                 log.warning("Error ending session: %s", exc)
-                
+
             log.info("Session cleared")
         return self.status
 
@@ -311,9 +315,14 @@ class SessionOrchestrator:
         """
         Steady clock: pop one item from the buffer every DISPLAY_INTERVAL seconds.
         Applies device commands and records the display.
+
+        TTS synthesis happens here so that audio generation time does NOT
+        block the producer (model generation) or the poll() endpoint.
         """
         while True:
             should_sleep = False
+            item: DisplayItem | None = None
+
             with self.lock:
                 if self.state == "idle":
                     break
@@ -343,12 +352,12 @@ class SessionOrchestrator:
 
     def _generator_loop(self) -> None:
         max_backoff = 60.0
-        
+
         while True:
             should_sleep_paused = False
             should_generate = False
             buffer_depth = 0
-            
+
             with self.lock:
                 if self.state == "idle":
                     break
@@ -360,13 +369,13 @@ class SessionOrchestrator:
                         buffer_depth <= self.LOW_WATERMARK
                         and not self._big_in_flight
                     )
-            
+
             if should_sleep_paused:
                 time.sleep(1.0)
             elif should_generate:
                 log.info("Buffer low (%d <= %d) — requesting big model", buffer_depth, self.LOW_WATERMARK)
                 self._request_big_model()
-                
+
                 # Adaptive wait: longer after each failure
                 backoff = min(5.0 * (2 ** self._consecutive_failures), max_backoff)
                 time.sleep(backoff)
@@ -396,6 +405,9 @@ class SessionOrchestrator:
         """
         Generates one batch of HIGH_WATERMARK turns and appends to the buffer.
         Uses stateful chat: only sends minimal user prompt, not full system prompt.
+
+        TTS is pre-generated for each turn so the display loop can serve
+        audio immediately without waiting.
         """
         try:
             # Build minimal user prompt with fresh context only
@@ -417,16 +429,15 @@ class SessionOrchestrator:
             self.brain.record_turns(turns)
             self.session.add_turns(turns)
 
+            # Pre-generate TTS for each turn (parallelise if desired)
+            display_items: list[DisplayItem] = []
+            for turn in turns:
+                item = self._build_display_item(turn)
+                display_items.append(item)
+
             with self.lock:
-                for turn in turns:
-                    self._pending.append(
-                        DisplayItem(
-                            source="big",
-                            speech=turn.speech,
-                            commands=turn.commands.as_dict(),
-                            raw=turn.raw,
-                        )
-                    )
+                for item in display_items:
+                    self._pending.append(item)
 
             log.info(
                 "Big model returned %d turns  total_pending=%d",
@@ -441,6 +452,36 @@ class SessionOrchestrator:
         finally:
             with self.lock:
                 self._big_in_flight = False
+
+    def _build_display_item(self, turn: Turn) -> DisplayItem:
+        """
+        Build a DisplayItem from a parsed Turn, running TTS synthesis
+        to obtain audio and word-level timestamps.
+        """
+        speech = turn.speech or ""
+        tts_meta: dict = {}
+
+        if speech.strip():
+            try:
+                tts_meta = tts.synthesize(speech)
+            except Exception as exc:
+                log.warning("TTS synthesis failed for turn %d: %s", turn.index, exc)
+                tts_meta = {
+                    "audio_url": None,
+                    "audio_path": None,
+                    "words": [],
+                    "duration_ms": 0,
+                }
+
+        return DisplayItem(
+            source="big",
+            speech=speech,
+            commands=turn.commands.as_dict(),
+            raw=turn.raw,
+            audio_url=tts_meta.get("audio_url"),
+            words=tts_meta.get("words", []),
+            duration_ms=tts_meta.get("duration_ms", 0),
+        )
 
     def _handle_big_failure(self, reason: str) -> None:
         with self.lock:
