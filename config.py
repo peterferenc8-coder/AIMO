@@ -39,7 +39,7 @@ SMALL_EXAMPLES_DIR = BASE_PROMPTS_DIR / "examples" / "small"
 
 # ── Small / Fast Filler Model ────────────────────────────────────────────────
 SMALL_MODEL = os.getenv("SMALL_MODEL", "gemma-3-12b-it")
-DISPLAY_INTERVAL = 12.0   # seconds between displayed turns
+DISPLAY_INTERVAL = 30.0   # seconds between displayed turns
 LOW_WATERMARK = 3         # request more when buffer <= 3
 HIGH_WATERMARK = 10       # generate 10 turns per batch
 GENERATOR_SLEEP = 2.0     # seconds between buffer checks
