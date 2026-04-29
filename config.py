@@ -39,7 +39,7 @@ SMALL_EXAMPLES_DIR = BASE_PROMPTS_DIR / "examples" / "small"
 
 # ── Small / Fast Filler Model ────────────────────────────────────────────────
 SMALL_MODEL = os.getenv("SMALL_MODEL", "gemma-3-12b-it")
-DISPLAY_INTERVAL = 30.0   # seconds between displayed turns
+DISPLAY_INTERVAL = 10.0   # seconds between displayed turns
 LOW_WATERMARK = 3         # request more when buffer <= 3
 HIGH_WATERMARK = 10       # generate 10 turns per batch
 GENERATOR_SLEEP = 2.0     # seconds between buffer checks
@@ -91,6 +91,11 @@ FLASK_HOST  = os.getenv("FLASK_HOST", "0.0.0.0")
 
 # ── Logging ──────────────────────────────────────────────────────────────────────
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# ── Kokoro TTS ───────────────────────────────────────────────────────────────
+KOKORO_VOICE = os.getenv("KOKORO_VOICE", "af_heart")
+KOKORO_SPEED = float(os.getenv("KOKORO_SPEED", "1.0"))
+KOKORO_DEVICE = os.getenv("KOKORO_DEVICE", "auto")   # "auto", "cpu", "cuda"
 
 # ── Device bridge ────────────────────────────────────────────────────────────
 DEFAULT_DEVICE_WS_URL = os.getenv("DEVICE_WS_URL", "ws://localhost:8888")

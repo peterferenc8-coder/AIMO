@@ -2,10 +2,17 @@ let pollHandle = null;
 let displayIndex = 0;
 let isRunning = false;
 let startTime = null;
-let totalElapsedTime = 0; // Track total elapsed time across pause/resume
+let totalElapsedTime = 0;
 let timerInterval = null;
 let lastDisplayedSpeech = '';
-let currentPattern = null; // Track the current pattern for resume
+let currentPattern = null;
+
+// ── Audio & word-sync state ───────────────────────────────────────────────
+let currentAudio = null;
+let currentWordTimer = null;
+let activeWords = [];      // [{word, start_ms, end_ms}, ...]
+let activeWordIndex = -1;
+let isAudioPlaying = false;
 
 const typingQueue = [];
 let isTyping = false;
@@ -33,7 +40,110 @@ function resetTimer() {
   document.getElementById('ai-timer').textContent = '';
 }
 
-// ── Typing animation ───────────────────────────────────────────────────────
+// ── Audio playback with word sync ─────────────────────────────────────────
+function stopCurrentAudio() {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+    currentAudio = null;
+  }
+  if (currentWordTimer) {
+    clearInterval(currentWordTimer);
+    currentWordTimer = null;
+  }
+  activeWords = [];
+  activeWordIndex = -1;
+  isAudioPlaying = false;
+  // Clear any highlighted words in the DOM
+  document.querySelectorAll('.word-highlight').forEach(el => {
+    el.classList.remove('word-highlight');
+  });
+}
+
+function playAudioWithWordSync(audioUrl, words, speechEl) {
+  if (!audioUrl || !words || words.length === 0) {
+    // No audio or no timing data – just show the full text immediately
+    return;
+  }
+
+  stopCurrentAudio();
+
+  activeWords = words;
+  activeWordIndex = -1;
+  isAudioPlaying = true;
+
+  // Build word spans inside speechEl for highlighting
+  speechEl.innerHTML = '';
+  words.forEach((w, i) => {
+    const span = document.createElement('span');
+    span.className = 'word-token';
+    span.dataset.index = i;
+    span.textContent = w.word;
+    speechEl.appendChild(span);
+    // Add space after word (except last)
+    if (i < words.length - 1) {
+      speechEl.appendChild(document.createTextNode(' '));
+    }
+  });
+
+  currentAudio = new Audio(audioUrl);
+  currentAudio.play().catch(err => {
+    console.warn('Audio play failed:', err);
+    isAudioPlaying = false;
+  });
+
+  // Word highlight loop: check audio.currentTime against word timings
+  currentWordTimer = setInterval(() => {
+    if (!currentAudio || currentAudio.paused) {
+      return;
+    }
+    const t = currentAudio.currentTime * 1000; // ms
+
+    // Find current word
+    let newIndex = -1;
+    for (let i = 0; i < activeWords.length; i++) {
+      if (t >= activeWords[i].start_ms && t < activeWords[i].end_ms) {
+        newIndex = i;
+        break;
+      }
+    }
+
+    if (newIndex !== activeWordIndex) {
+      activeWordIndex = newIndex;
+      // Update DOM highlighting
+      speechEl.querySelectorAll('.word-token').forEach((span, i) => {
+        if (i === newIndex) {
+          span.classList.add('word-highlight');
+          span.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+          span.classList.remove('word-highlight');
+        }
+      });
+    }
+
+    // Auto-advance: if we're past the last word, stop the timer
+    if (activeWords.length > 0 && t >= activeWords[activeWords.length - 1].end_ms + 200) {
+      clearInterval(currentWordTimer);
+      currentWordTimer = null;
+    }
+  }, 30); // 30ms refresh for smooth highlighting
+
+  currentAudio.addEventListener('ended', () => {
+    isAudioPlaying = false;
+    if (currentWordTimer) {
+      clearInterval(currentWordTimer);
+      currentWordTimer = null;
+    }
+    // Leave last word highlighted briefly, then clear
+    setTimeout(() => {
+      speechEl.querySelectorAll('.word-token').forEach(span => {
+        span.classList.remove('word-highlight');
+      });
+    }, 500);
+  });
+}
+
+// ── Typing animation (fallback when no TTS) ───────────────────────────────
 function typeText(el, text, speed = 20) {
   return new Promise(resolve => {
     let i = 0;
@@ -85,7 +195,25 @@ function makeAICard(item) {
   `;
 
   const speechEl = card.querySelector('.turn-speech');
-  if (item.source === 'big' && item.speech) {
+
+  // If we have TTS data, show words as spans and sync with audio
+  if (item.audio_url && item.words && item.words.length > 0) {
+    // Build placeholder spans (will be filled when audio starts)
+    item.words.forEach((w, i) => {
+      const span = document.createElement('span');
+      span.className = 'word-token';
+      span.dataset.index = i;
+      span.textContent = w.word;
+      speechEl.appendChild(span);
+      if (i < item.words.length - 1) {
+        speechEl.appendChild(document.createTextNode(' '));
+      }
+    });
+
+    // Start audio playback immediately with word sync
+    playAudioWithWordSync(item.audio_url, item.words, speechEl);
+  } else if (item.source === 'big' && item.speech) {
+    // Fallback: typing animation when no TTS available
     enqueueTyping(speechEl, item.speech);
   } else {
     speechEl.textContent = item.speech || '';
@@ -158,6 +286,7 @@ function setAILoading(on) {
 }
 
 function clearAIStream() {
+  stopCurrentAudio();
   document.getElementById('ai-list-stream').innerHTML = `
     <div class="empty-state">
       <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -230,7 +359,8 @@ document.getElementById('ai-pause').addEventListener('click', async () => {
     updateAIStatus(data.state);
     isRunning = data.state === 'running';
     stopTimer();
-    
+    stopCurrentAudio(); // Pause audio too
+
     // Send device stop command - don't block on this
     try {
       window.App.sendDeviceCmd({ cmd: 'stop' });
@@ -249,26 +379,26 @@ document.getElementById('ai-resume').addEventListener('click', async () => {
     console.log('Fetching /api/resume');
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
-    const res = await fetch('/api/resume', { 
+
+    const res = await fetch('/api/resume', {
       method: 'POST',
       signal: controller.signal
     });
-    
+
     clearTimeout(timeoutId);
     console.log('Resume response received:', res.status);
-    
+
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
-    
+
     const data = await res.json();
     console.log('Resume response data:', data);
     updateAIStatus(data.state);
     isRunning = data.state === 'running';
     if (isRunning) {
       startTimer();
-      
+
       // Restart the pattern if one is active
       if (currentPattern) {
         try {
@@ -296,14 +426,14 @@ document.getElementById('ai-stop').addEventListener('click', async () => {
     window.App.hideError();
     displayIndex = 0;
     currentPattern = null;
-    
+
     // Send device stop command
     try {
       window.App.sendDeviceCmd({ cmd: 'stop' });
     } catch (deviceErr) {
       console.error('Device command failed on stop:', deviceErr);
     }
-    
+
     updateAIStatus('idle');
   } catch (err) {
     window.App.showError('Stop failed: ' + err.message);

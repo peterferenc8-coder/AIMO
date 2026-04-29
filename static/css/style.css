@@ -715,3 +715,46 @@ input[type="range"] {
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 3px; }
+
+
+/* ── TTS Word Sync Styles ──────────────────────────────────────────────── */
+
+.word-token {
+  display: inline;
+  transition: color 0.05s ease, background-color 0.05s ease;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.word-highlight {
+  color: #fff;
+  background-color: #e91e63;  /* pink accent matching the app theme */
+  border-radius: 3px;
+  padding: 1px 3px;
+  font-weight: 600;
+  box-shadow: 0 0 6px rgba(233, 30, 99, 0.4);
+}
+
+.turn-speech {
+  line-height: 1.7;
+  word-wrap: break-word;
+}
+
+/* Audio indicator on cards that have TTS */
+.turn-card.has-audio .turn-header::after {
+  content: "🔊";
+  margin-left: 6px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+/* Typing cursor (fallback when no TTS) */
+.typing::after {
+  content: "|";
+  animation: blink 1s step-end infinite;
+  color: #e91e63;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}

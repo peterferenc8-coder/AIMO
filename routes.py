@@ -29,6 +29,7 @@ from prompt_store import (
 )
 from prompt_builder import get_pacing_strategies, get_persona_moods
 from settings_store import load_settings, mask_secret, provider_presence, save_settings
+import tts
 
 import queue
 from device_bridge import get_bridge
@@ -493,6 +494,50 @@ def register_routes(app: Flask) -> None:
 
         _device.send(body)
         return jsonify({"ok": True})
+
+    # ── TTS Routes ──────────────────────────────────────────────────────────
+
+    @app.get("/api/tts/audio/<string:cache_key>")
+    def api_tts_audio(cache_key: str):
+        """Serve a cached TTS audio file by its cache key."""
+        path = tts.get_audio_path(cache_key)
+        if path is None or not path.exists():
+            abort(404)
+        return send_file(path, mimetype="audio/wav")
+
+    @app.get("/api/tts/cache")
+    def api_tts_cache():
+        """List all cached TTS utterances (for debug/admin)."""
+        return jsonify({"ok": True, "items": tts.list_cache()})
+
+    @app.post("/api/tts/clear")
+    def api_tts_clear():
+        """Delete all cached TTS audio files."""
+        count = tts.clear_cache()
+        return jsonify({"ok": True, "removed": count})
+
+    @app.post("/api/tts/synthesize")
+    def api_tts_synthesize():
+        """
+        On-demand TTS synthesis endpoint.
+        Body: { text: str, voice?: str, speed?: float }
+        Returns: { audio_url, words: [{word, start_ms, end_ms}], duration_ms }
+        """
+        body = request.get_json(silent=True) or {}
+        text = body.get("text", "")
+        if not text or not text.strip():
+            return jsonify({"ok": False, "error": "Missing text"}), 400
+
+        try:
+            result = tts.synthesize(
+                text,
+                voice=body.get("voice"),
+                speed=body.get("speed"),
+            )
+            return jsonify({"ok": True, **result})
+        except Exception as exc:
+            log.error("TTS synthesis error: %s", exc)
+            return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 def _validate_google_key(api_key: str, model: str) -> dict:
