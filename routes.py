@@ -276,6 +276,7 @@ def register_routes(app: Flask) -> None:
                 "groq_model_options": GROQ_MODEL_OPTIONS,
                 "google_validation": google_validation,
                 "groq_validation": groq_validation,
+                "tts_enabled": settings.get("tts_enabled", True),
                 "prompt_names": list_base_prompt_names(),
             }
         )
@@ -290,6 +291,7 @@ def register_routes(app: Flask) -> None:
             "groq_api_key": _keep_existing(body.get("groq_api_key"), current.get("groq_api_key", "")),
             "google_model": _keep_existing(body.get("google_model"), current.get("google_model", "")),
             "groq_model": _keep_existing(body.get("groq_model"), current.get("groq_model", "")),
+            "tts_enabled": body.get("tts_enabled", current.get("tts_enabled", True)),
         }
 
         google_validation = _validate_google_key(next_settings["google_api_key"], next_settings["google_model"])
@@ -307,6 +309,7 @@ def register_routes(app: Flask) -> None:
                 "saved": _saved_settings_payload(next_settings),
                 "google_validation": google_validation,
                 "groq_validation": groq_validation,
+                "tts_enabled": next_settings["tts_enabled"],
                 "prompt_names": list_base_prompt_names(),
             }
         )

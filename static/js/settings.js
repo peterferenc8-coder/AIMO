@@ -89,6 +89,9 @@ async function loadSettings() {
 
   $settings('settings-prompt-count').textContent = `${settingsState.promptNames.length} files`;
 
+  const ttsCheckbox = $settings('settings-tts-enabled');
+  if (ttsCheckbox) ttsCheckbox.checked = Boolean(data.tts_enabled);
+
   syncModelLock('google');
   syncModelLock('groq');
   setSettingsMessage('Settings loaded.');
@@ -127,6 +130,11 @@ function showValidationSummary(data) {
     setSettingsMessage('Settings saved and both keys validated.');
   } else {
     setSettingsMessage('Settings saved, but one or more provider validations failed.', anyFailed);
+  }
+
+  const ttsCheckbox = $settings('settings-tts-enabled');
+  if (ttsCheckbox) {
+    ttsCheckbox.checked = Boolean(data.tts_enabled);
   }
 }
 
@@ -230,6 +238,30 @@ async function revertPromptOverrides() {
   setSettingsMessage(`Reverted ${data.removed} override file(s).`);
 }
 
+async function updateTTSSetting() {
+  const ttsCheckbox = $settings('settings-tts-enabled');
+  if (!ttsCheckbox) return;
+
+  const payload = {
+    tts_enabled: ttsCheckbox.checked,
+  };
+
+  const response = await fetch('/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+
+  if (!response.ok || !data.ok) {
+    setSettingsMessage(data.error || 'Failed to save TTS setting', true);
+    return;
+  }
+
+  applySavedStates(data);
+  setSettingsMessage(`TTS ${data.tts_enabled ? 'enabled' : 'disabled'}.`);
+}
+
 function wireSettingsEvents() {
   for (const provider of ['google', 'groq']) {
     const keyField = $settings(`settings-${provider}-key`);
@@ -256,6 +288,9 @@ function wireSettingsEvents() {
       setSettingsMessage(`Selected ${promptSelect.value}.`);
     });
   }
+
+  const updateTtsBtn = $settings('settings-update-tts');
+  if (updateTtsBtn) updateTtsBtn.addEventListener('click', updateTTSSetting);
 }
 
 wireSettingsEvents();
