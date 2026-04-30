@@ -19,6 +19,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "groq_api_key": "",
     "google_model": "gemma-4-31b-it",
     "groq_model": "openai/gpt-oss-120b",
+    "tts_enabled": True,
     "google_validation": {
         "ok": False,
         "message": "Not validated yet",
@@ -52,6 +53,7 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
     settings["groq_api_key"] = _as_clean_text(settings.get("groq_api_key"))
     settings["google_model"] = _as_clean_text(settings.get("google_model"))
     settings["groq_model"] = _as_clean_text(settings.get("groq_model"))
+    settings["tts_enabled"] = bool(settings.get("tts_enabled", DEFAULT_SETTINGS["tts_enabled"]))
     settings["google_validation"] = _normalized_validation(settings.get("google_validation"))
     settings["groq_validation"] = _normalized_validation(settings.get("groq_validation"))
     return settings

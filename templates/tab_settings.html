@@ -43,6 +43,20 @@
     </div>
 
     <div class="settings-card">
+      <h3>Text-to-Speech</h3>
+      <p class="settings-note">Enable or disable TTS synthesis for AI responses.</p>
+
+      <div class="settings-field">
+        <label for="settings-tts-enabled">Enable TTS</label>
+        <input type="checkbox" id="settings-tts-enabled" />
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn btn-primary" id="settings-update-tts">Save TTS Setting</button>
+      </div>
+    </div>
+
+    <div class="settings-card">
       <h3>Prompt Files</h3>
       <p class="settings-note">Files are resolved from <code>prompts/current</code> first and fall back to <code>prompts/base</code>. Upload names must match an existing base file.</p>
 

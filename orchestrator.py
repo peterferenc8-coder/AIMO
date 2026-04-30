@@ -85,6 +85,7 @@ class SessionOrchestrator:
 
     def __init__(self):
         self._settings = load_settings()
+        self.tts_enabled = self._settings.get("tts_enabled", True)
         self.google_connector = GoogleAIConnector(
             api_key=self._settings.get("google_api_key", ""),
             model=self._settings.get("google_model", "gemma-4-31b-it"),
@@ -137,6 +138,7 @@ class SessionOrchestrator:
     def apply_settings(self, settings: dict[str, str]) -> dict[str, str]:
         """Update live connectors and prompt assets from saved settings."""
         self._settings.update(settings)
+        self.tts_enabled = self._settings.get("tts_enabled", True)
         self.google_connector.reconfigure(
             api_key=self._settings.get("google_api_key", ""),
             model=self._settings.get("google_model", self.google_connector.model),
@@ -456,12 +458,12 @@ class SessionOrchestrator:
     def _build_display_item(self, turn: Turn) -> DisplayItem:
         """
         Build a DisplayItem from a parsed Turn, running TTS synthesis
-        to obtain audio and word-level timestamps.
+        to obtain audio and word-level timestamps (if TTS is enabled).
         """
         speech = turn.speech or ""
         tts_meta: dict = {}
 
-        if speech.strip():
+        if speech.strip() and self.tts_enabled:
             try:
                 tts_meta = tts.synthesize(speech)
             except Exception as exc:
@@ -472,6 +474,14 @@ class SessionOrchestrator:
                     "words": [],
                     "duration_ms": 0,
                 }
+        elif speech.strip() and not self.tts_enabled:
+            # TTS is disabled, provide empty audio metadata
+            tts_meta = {
+                "audio_url": None,
+                "audio_path": None,
+                "words": [],
+                "duration_ms": 0,
+            }
 
         return DisplayItem(
             source="big",
