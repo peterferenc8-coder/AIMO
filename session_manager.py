@@ -30,9 +30,11 @@ class DeviceState:
     """
     pattern:   str | None = None
     speed:     int | None = None
-    intensity: int | None = None
+    intensity: float | None = None
     depth:     int | None = None
     base:      int | None = None
+    intent:    str | None = None
+    ai_intensity: float | None = None
 
     def apply(self, commands: Commands) -> None:
         """Merge a Commands object into the running state (null = no change)."""
@@ -47,13 +49,22 @@ class DeviceState:
         if commands.base      is not None:
             self.base = commands.base
 
+    def apply_intent(self, intent: str | None, intensity: float | None) -> None:
+        """Track the AI's narrative intent separately from device params."""
+        if intent is not None:
+            self.intent = intent
+        if intensity is not None:
+            self.ai_intensity = intensity
+
     def as_dict(self) -> dict:
         return {
-            "pattern":   self.pattern,
-            "speed":     self.speed,
-            "intensity": self.intensity,
-            "depth":     self.depth,
-            "base":      self.base,
+            "pattern":      self.pattern,
+            "speed":        self.speed,
+            "intensity":    self.intensity,
+            "depth":        self.depth,
+            "base":         self.base,
+            "intent":       self.intent,
+            "ai_intensity": self.ai_intensity,
         }
 
 
@@ -74,6 +85,8 @@ class SessionManager:
         """Append new turns and update the effective device state."""
         for turn in turns:
             self._device.apply(turn.commands)
+            # Turn.ai_intensity is the AI-provided narrative intensity.
+            self._device.apply_intent(turn.intent, turn.ai_intensity)
             self._turns.append(turn)
         log.debug("Added %d turns; total=%d", len(turns), len(self._turns))
 

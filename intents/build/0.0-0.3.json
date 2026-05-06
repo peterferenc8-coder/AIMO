@@ -1,0 +1,36 @@
+{
+    "name": "build_gentle",
+    "description": "The very beginning of escalation. Barely-there motion that hints at what's coming. The subject should feel a tease of potential — this is going somewhere, but not yet. Slow, shallow, patient.",
+    "intensity_range": [0.0, 0.3],
+    "pattern": "simple_stroke",
+    "speed": 10,
+    "depth": 15,
+    "base": 0,
+    "duration_ms": 7000,
+    "easing": "sine_in_out",
+    "variations": [
+        {
+            "probability": 0.4,
+            "pattern": "simple_stroke",
+            "speed": 20,
+            "depth": 20,
+            "duration_ms": 8000
+        },
+        {
+            "probability": 0.35,
+            "pattern": "half_n_half",
+            "speed": 30,
+            "depth": 50,
+            "intensity": -20,
+            "duration_ms": 9000
+        },
+        {
+            "probability": 0.25,
+            "pattern": "teasing_and_pounding",
+            "speed": 20,
+            "depth": 50,
+            "intensity": -60,
+            "duration_ms": 10000
+        }
+    ]
+}

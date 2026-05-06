@@ -36,6 +36,8 @@ SMALL_FALLBACK_TASK_FILE = PROMPT_TASKS_DIR / "small_fallback_task.txt"
 
 SMALL_EXAMPLES_DIR = BASE_PROMPTS_DIR / "examples" / "small"
 
+# ── Intents ─────────────────────────────────────────────────────────────────
+INTENTS_DIR = BASE_DIR / "intents"
 
 # ── Small / Fast Filler Model ────────────────────────────────────────────────
 SMALL_MODEL = os.getenv("SMALL_MODEL", "gemma-3-12b-it")

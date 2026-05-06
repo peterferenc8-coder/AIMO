@@ -117,7 +117,7 @@ class PromptBuilder:
             state_desc = self._format_device_state(device_state)
             sections.append(f"Current state: {state_desc}")
 
-        # C) Banned phrases (last N turns, truncated heavily)
+        # D) Banned phrases (last N turns, truncated heavily)
         recent_speech = [
             t.speech for t in session_turns[-BANNED_PHRASE_WINDOW:]
         ]
@@ -162,9 +162,9 @@ class PromptBuilder:
         self.current_persona = mood
         sections.append(f"Your dominant affect: {mood}")
 
-        # C) Opening pattern
-        opening = _pick_or_random(None, self._opening_patterns)
-        sections.append(f'Start with pattern: "{opening}".')
+        # C) Opening intent (instead of pattern)
+        opening_intent = _pick_or_random(None, self._opening_intents)
+        sections.append(f'Start with intent: "{opening_intent}".')
 
         # D) First turn instruction
         sections.append(
@@ -190,6 +190,10 @@ class PromptBuilder:
     @staticmethod
     def _format_device_state(state: DeviceState) -> str:
         parts = []
+        if getattr(state, 'intent', None):
+            parts.append(f"intent={state.intent}")
+        if getattr(state, 'intensity', None) is not None:
+            parts.append(f"intensity={state.intensity}")
         if state.pattern:
             parts.append(f"pattern={state.pattern}")
         if state.speed is not None:
@@ -198,8 +202,6 @@ class PromptBuilder:
             parts.append(f"depth={state.depth}")
         if state.base is not None:
             parts.append(f"base={state.base}")
-        if state.intensity is not None:
-            parts.append(f"intensity={state.intensity}")
         return ", ".join(parts) if parts else "stopped"
 
     # ── File loading ──────────────────────────────────────────────────────────
@@ -236,7 +238,7 @@ class PromptBuilder:
     def reload(self) -> None:
         self._base_prompt = self._load_base_prompt()
         self._examples = self._load_examples()
-
+        self._opening_intents = get_opening_intents()
         self._persona_moods = get_persona_moods()
         self._pacing_strategies = get_pacing_strategies()
         self._opening_patterns = get_opening_patterns()
@@ -250,3 +252,7 @@ def _pick_or_random(selected: str | None, available: list[str]) -> str:
     if available:
         return random.choice(available)
     return ""   
+
+def get_opening_intents() -> list[str]:
+    # Could load from file, or derive from intent compiler
+    return ["tease", "ground", "stop"]

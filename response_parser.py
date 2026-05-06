@@ -2,11 +2,9 @@
 response_parser.py
 ------------------
 Parses the raw text coming back from the model and extracts structured
-fields: speech, pattern, speed, intensity, depth, base.
+fields: speech, intent, intensity, duration_ms.
 
-The model is instructed to return a JSON list of objects. In practice
-Gemma sometimes wraps the JSON in markdown fences or emits a single
-object instead of a list – this module handles all those edge-cases.
+The model returns a JSON list of objects with intent+intensity format.
 """
 
 import json
@@ -23,14 +21,12 @@ log = logging.getLogger(__name__)
 @dataclass
 class Commands:
     """
-    Parsed device command block.
-
-    None means 'no change' (null in JSON). The device keeps the
-    previous value when a field is null.
+    Parsed device command block — now produced by IntentCompiler, not the LLM.
+    Kept for backward compatibility during transition.
     """
     pattern:   str | None = None
     speed:     int | None = None
-    intensity: int | None = None
+    intensity: float | None = None
     depth:     int | None = None
     base:      int | None = None
 
@@ -52,18 +48,24 @@ class Commands:
 
 @dataclass
 class Turn:
-    """One complete model turn: what was said + what the device should do."""
-    index:    int
-    speech:   str
-    commands: Commands = field(default_factory=Commands)
-    raw:      dict = field(default_factory=dict)
+    """One complete model turn: what was said + what the AI wants to do."""
+    index:     int
+    speech:    str
+    intent:    str | None = None       # NEW: narrative intent
+    ai_intensity: float | None = None    # NEW: 0.0-1.0 (from the AI)
+    duration_ms: int | None = None     # NEW: how long this intent lasts
+    commands:  Commands = field(default_factory=Commands)
+    raw:       dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
-            "index":    self.index,
-            "speech":   self.speech,
-            "commands": self.commands.as_dict(),
-            "raw":      self.raw,
+            "index":     self.index,
+            "speech":    self.speech,
+            "intent":    self.intent,
+            "ai_intensity": self.ai_intensity,
+            "duration_ms": self.duration_ms,
+            "commands":  self.commands.as_dict(),
+            "raw":       self.raw,
         }
 
 
@@ -72,14 +74,10 @@ class Turn:
 class ResponseParser:
     """
     Converts a raw model response string into a list of Turn objects.
+    Expects intent+intensity format from the LLM.
     """
 
     def parse(self, raw_text: str) -> list[Turn]:
-        """
-        Parse raw model output into a list of Turn objects.
-
-        Returns an empty list on total failure (logged as error).
-        """
         cleaned = self._strip_markdown_fences(raw_text)
         payload = self._extract_json(cleaned)
 
@@ -87,7 +85,6 @@ class ResponseParser:
             log.error("Could not extract JSON from model response")
             return []
 
-        # Normalise single object to a one-element list.
         if isinstance(payload, dict):
             payload = [payload]
 
@@ -104,34 +101,29 @@ class ResponseParser:
         log.info("Parsed %d turn(s)", len(turns))
         return turns
 
-    # ── JSON extraction strategies ────────────────────────────────────────────
+    # ── JSON extraction (unchanged) ─────────────────────────────────────────
 
     @staticmethod
     def _strip_markdown_fences(text: str) -> str:
-        """Remove ```json … ``` or ``` … ``` wrappers."""
         text = text.strip()
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
         return text.strip()
 
     def _extract_json(self, text: str) -> Any:
-        # Strategy 1: direct parse (handles JSON array or single object)
         try:
             return json.loads(text)
         except json.JSONDecodeError:
             pass
 
-        # Strategy 2: NDJSON — multiple {"action":...}\n{"action":...} lines
         ndjson = self._extract_ndjson(text)
         if ndjson is not None:
             return ndjson
 
-        # Strategy 3: find first balanced list
         list_payload = self._extract_balanced(text, "[", "]")
         if list_payload is not None:
             return list_payload
 
-        # Strategy 4: find first balanced object
         obj_payload = self._extract_balanced(text, "{", "}")
         if obj_payload is not None:
             return obj_payload
@@ -139,10 +131,6 @@ class ResponseParser:
         return None
 
     def _extract_ndjson(self, text: str) -> list[dict] | None:
-        """
-        Parse newline-delimited JSON objects: {..}\n{..}\n{..}
-        Returns a list of dicts, or None if no valid objects found.
-        """
         objects: list[dict] = []
         for line in text.strip().splitlines():
             line = line.strip()
@@ -154,15 +142,10 @@ class ResponseParser:
                     objects.append(obj)
             except json.JSONDecodeError:
                 continue
-        
         return objects if objects else None
 
     @staticmethod
     def _extract_balanced(text: str, open_char: str, close_char: str) -> Any:
-        """
-        Find the first balanced pair of open/close characters and
-        attempt to parse the contents as JSON.
-        """
         start = text.find(open_char)
         if start == -1:
             return None
@@ -186,25 +169,30 @@ class ResponseParser:
         except json.JSONDecodeError:
             return None
 
-    # ── Turn parsing ──────────────────────────────────────────────────────────
+    # ── Turn parsing (updated for intent+intensity) ─────────────────────────
 
     @staticmethod
     def _parse_turn(index: int, item: Any) -> Turn | None:
-        """
-        Convert a single JSON object into a Turn, tolerating missing keys
-        and nested structures.
-        """
         if not isinstance(item, dict):
             log.warning("Turn %d is not a dict, skipping", index)
             return None
 
-        # The model sometimes wraps commands under "action", sometimes flat.
+        # Support nested "action" wrapper or flat structure
         payload = item.get("action") if isinstance(item.get("action"), dict) else item
 
         speech = _normalise_speech(
             payload.get("speech", item.get("speech", ""))
         )
 
+        # NEW: Extract intent + ai_intensity + duration
+        intent = _normalise_string(payload.get("intent"))
+        # Accept new key `ai_intensity` but fall back to legacy `intensity`.
+        ai_intensity = _to_float_or_none(
+            payload.get("ai_intensity", payload.get("intensity"))
+        )
+        duration_ms = _to_int_or_none(payload.get("duration_ms"))
+
+        # Legacy commands block (optional, for backward compat)
         raw_cmds = payload.get("commands", item.get("commands", {})) or {}
         if not isinstance(raw_cmds, dict):
             raw_cmds = {}
@@ -212,18 +200,25 @@ class ResponseParser:
         commands = Commands(
             pattern   = payload.get("pattern", raw_cmds.get("pattern")),
             speed     = _to_int_or_none(payload.get("speed", raw_cmds.get("speed"))),
-            intensity = _to_int_or_none(payload.get("intensity", raw_cmds.get("intensity"))),
+            intensity = _to_float_or_none(payload.get("intensity", raw_cmds.get("intensity"))),
             depth     = _to_int_or_none(payload.get("depth", raw_cmds.get("depth"))),
             base      = _to_int_or_none(payload.get("base", raw_cmds.get("base"))),
         )
 
-        return Turn(index=index, speech=speech, commands=commands, raw=item)
+        return Turn(
+            index=index,
+            speech=speech,
+            intent=intent,
+            ai_intensity=ai_intensity,
+            duration_ms=duration_ms,
+            commands=commands,
+            raw=item,
+        )
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers ─────────────────────────────────────────────────────────────────
 
 def _to_int_or_none(value: Any) -> int | None:
-    """Convert a value to int, returning None for null/None/non-numeric."""
     if value is None:
         return None
     try:
@@ -232,8 +227,17 @@ def _to_int_or_none(value: Any) -> int | None:
         return None
 
 
+def _to_float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        f = float(value)
+        return max(0.0, min(1.0, f))  # Clamp to [0, 1]
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalise_speech(value: Any) -> str:
-    """Convert speech content from either a string or list of strings into text."""
     if isinstance(value, list):
         parts = [str(part).strip() for part in value if part is not None]
         return " ".join(part for part in parts if part)
@@ -242,3 +246,10 @@ def _normalise_speech(value: Any) -> str:
     if isinstance(value, str):
         return value
     return str(value)
+
+
+def _normalise_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    s = str(value).strip().lower()
+    return s if s else None
