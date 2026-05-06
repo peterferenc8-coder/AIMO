@@ -233,7 +233,12 @@ function updateParamChips(cmds) {
   if (cmds.speed !== null && cmds.speed !== undefined) document.getElementById('ai-param-speed').textContent = cmds.speed + '%';
   if (cmds.depth !== null && cmds.depth !== undefined) document.getElementById('ai-param-depth').textContent = cmds.depth + '%';
   if (cmds.base !== null && cmds.base !== undefined) document.getElementById('ai-param-base').textContent = cmds.base + '%';
-  if (cmds.intensity !== null && cmds.intensity !== undefined) document.getElementById('ai-param-intensity').textContent = cmds.intensity;
+  // Prefer pattern-level intensity (if present), otherwise fall back to commands.intensity
+  let displayIntensity = null;
+  if (cmds.pattern_intensity !== null && cmds.pattern_intensity !== undefined) displayIntensity = cmds.pattern_intensity;
+  else if (cmds.intensity !== null && cmds.intensity !== undefined) displayIntensity = cmds.intensity;
+  else if (cmds.ai_intensity !== null && cmds.ai_intensity !== undefined) displayIntensity = cmds.ai_intensity;
+  if (displayIntensity !== null && displayIntensity !== undefined) document.getElementById('ai-param-intensity').textContent = displayIntensity;
 }
 
 // ── Poll loop ──────────────────────────────────────────────────────────────

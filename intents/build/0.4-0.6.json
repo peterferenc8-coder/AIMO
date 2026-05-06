@@ -1,0 +1,37 @@
+{
+    "name": "build_medium",
+    "description": "Clear escalation. The subject feels the intensity climbing — deeper, faster, more filling. The promise is being kept. Momentum is building and there's no stopping it now.",
+    "intensity_range": [0.4, 0.6],
+    "pattern": "deeper",
+    "speed": 30,
+    "depth": 45,
+    "base": 5,
+    "intensity": 10,
+    "duration_ms": 8000,
+    "easing": "sine_in_out",
+    "variations": [
+        {
+            "probability": 0.35,
+            "pattern": "simple_stroke",
+            "speed": 40,
+            "depth": 50,
+            "duration_ms": 7000
+        },
+        {
+            "probability": 0.35,
+            "pattern": "teasing_and_pounding",
+            "speed": 45,
+            "depth": 40,
+            "intensity": 20,
+            "duration_ms": 8000
+        },
+        {
+            "probability": 0.3,
+            "pattern": "half_n_half",
+            "speed": 35,
+            "depth": 55,
+            "intensity": 10,
+            "duration_ms": 9000
+        }
+    ]
+}

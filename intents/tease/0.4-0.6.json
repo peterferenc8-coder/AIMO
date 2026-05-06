@@ -1,0 +1,31 @@
+{
+  "name": "tease_medium",
+  "description": "Light, playful stimulation. Shallow depth, slow speed, drawing out anticipation. The subject should feel barely-there touches, just enough to want more.",
+  "intensity_range": [0.4, 0.6],
+  "pattern": "simple_stroke",
+  "speed": 10,
+  "depth": 20,
+  "base": 0,
+  "duration_ms": 6000,
+  "easing": "sine_in_out",
+  "variations": [
+    {
+      "probability": 0.5,
+      "pattern": "stop_n_go",
+      "speed": 20,
+      "depth": 25
+    },
+    {
+      "probability": 0.3,
+      "pattern": "teasing_and_pounding",
+      "speed": 20,
+      "depth": 15,
+      "intensity": -60
+    },
+    {
+      "probability": 0.2,
+      "speed": 30,
+      "depth": 30
+    }
+  ]
+}

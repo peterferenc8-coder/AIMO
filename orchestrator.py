@@ -21,6 +21,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from intent_compiler import IntentCompiler
 
 from device_bridge import get_bridge
 
@@ -110,7 +111,7 @@ class SessionOrchestrator:
         self.prompt_builder = PromptBuilder()
 
         self.lock = threading.RLock()
-
+        self.intent_compiler = IntentCompiler()
         self.state = "idle"
 
         # Buffer: pending items waiting to be displayed
@@ -208,15 +209,39 @@ class SessionOrchestrator:
             turns = self.parser.parse(raw_text)
 
             if turns:
-                self.brain.record_turns(turns)
-                self.session.add_turns(turns)
+                # Compile any narrative intents returned by the seed prompt
+                compiled_turns: list[Turn] = []
+                for turn in turns:
+                    if turn.intent and turn.ai_intensity is not None:
+                        try:
+                            compiled = self.intent_compiler.compile(
+                                intent=turn.intent,
+                                intensity=turn.ai_intensity,
+                            )
+                            turn.commands = Commands(
+                                pattern=compiled.pattern,
+                                speed=compiled.speed,
+                                depth=compiled.depth,
+                                base=compiled.base,
+                                intensity=compiled.pattern_intensity,
+                            )
+                            if turn.duration_ms is None:
+                                turn.duration_ms = compiled.duration_ms
+                        except ValueError as exc:
+                            log.warning(
+                                "Seed intent compilation failed for %s@%s: %s",
+                                turn.intent, turn.ai_intensity, exc
+                            )
+                    compiled_turns.append(turn)
+
+                self.brain.record_turns(compiled_turns)
+                self.session.add_turns(compiled_turns)
 
                 with self.lock:
-                    for turn in turns:
-                        self._pending.append(
-                            self._build_display_item(turn)
-                        )
-                log.info("Seed prompt returned %d turns", len(turns))
+                    for turn in compiled_turns:
+                        self._pending.append(self._build_display_item(turn))
+
+                log.info("Seed prompt returned %d turns", len(compiled_turns))
             else:
                 log.warning("Seed prompt returned no parseable turns")
 
@@ -404,23 +429,13 @@ class SessionOrchestrator:
         self._big_thread.start()
 
     def _big_model_worker(self) -> None:
-        """
-        Generates one batch of HIGH_WATERMARK turns and appends to the buffer.
-        Uses stateful chat: only sends minimal user prompt, not full system prompt.
-
-        TTS is pre-generated for each turn so the display loop can serve
-        audio immediately without waiting.
-        """
         try:
-            # Build minimal user prompt with fresh context only
             user_prompt = self.brain.build_turn_prompt(
                 n_turns=self.HIGH_WATERMARK,
                 device_state=self.session.device_state,
             )
 
-            # Send message in existing session (system prompt already set)
             raw_text = self.big_connector.send_message(user_prompt)
-
             turns = self.parser.parse(raw_text)
 
             if not turns:
@@ -428,12 +443,41 @@ class SessionOrchestrator:
                 self._handle_big_failure("Empty parseable response")
                 return
 
-            self.brain.record_turns(turns)
-            self.session.add_turns(turns)
-
-            # Pre-generate TTS for each turn (parallelise if desired)
-            display_items: list[DisplayItem] = []
+            # NEW: Compile intents to device commands
+            compiled_turns = []
             for turn in turns:
+                if turn.intent and turn.ai_intensity is not None:
+                    try:
+                        compiled = self.intent_compiler.compile(
+                            intent=turn.intent,
+                            intensity=turn.ai_intensity,
+                        )
+                        # Update turn.commands with compiled values; place pattern-level
+                        # intensity into the legacy commands.intensity field.
+                        turn.commands = Commands(
+                            pattern=compiled.pattern,
+                            speed=compiled.speed,
+                            depth=compiled.depth,
+                            base=compiled.base,
+                            intensity=compiled.pattern_intensity,
+                        )
+                        # Override duration if compiler specifies one
+                        if turn.duration_ms is None:
+                            turn.duration_ms = compiled.duration_ms
+                    except ValueError as exc:
+                        log.warning(
+                            "Intent compilation failed for %s@%s: %s",
+                            turn.intent, turn.ai_intensity, exc
+                        )
+                        # Fall through with whatever commands the LLM provided (legacy)
+
+                compiled_turns.append(turn)
+
+            self.brain.record_turns(compiled_turns)
+            self.session.add_turns(compiled_turns)
+
+            display_items = []
+            for turn in compiled_turns:
                 item = self._build_display_item(turn)
                 display_items.append(item)
 
@@ -443,7 +487,7 @@ class SessionOrchestrator:
 
             log.info(
                 "Big model returned %d turns  total_pending=%d",
-                len(turns),
+                len(compiled_turns),
                 len(self._pending),
             )
 

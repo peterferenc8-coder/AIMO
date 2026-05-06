@@ -356,6 +356,17 @@ def register_routes(app: Flask) -> None:
             }
         )
 
+    @app.get("/api/intents")
+    def api_intents():
+        """List all available intents and their metadata."""
+        return jsonify({
+            "ok": True,
+            "intents": [
+                _orchestrator.intent_compiler.get_intent_meta(name)
+                for name in _orchestrator.intent_compiler.list_intents()
+            ]
+        })
+
     @app.post("/api/prompts/revert")
     def api_prompts_revert():
         removed = clear_current_prompts()
@@ -551,3 +562,5 @@ def _validate_google_key(api_key: str, model: str) -> dict:
 def _validate_groq_key(api_key: str, model: str) -> dict:
     connector = GroqAIConnector(api_key=api_key, model=model)
     return connector.validate_api_key()
+
+    

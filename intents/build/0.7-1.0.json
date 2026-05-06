@@ -1,0 +1,45 @@
+{
+    "name": "build_hard",
+    "description": "The final push of escalation. Maximum depth, high speed, relentless. The subject is overwhelmed by the climb — every stroke is more than the last. The breaking point is near. This is the crescendo before release or denial.",
+    "intensity_range": [0.6, 1.0],
+    "pattern": "deeper",
+    "speed": 60,
+    "depth": 80,
+    "base": 10,
+    "intensity": 40,
+    "duration_ms": 7000,
+    "easing": "sine_in_out",
+    "variations": [
+        {
+            "probability": 0.3,
+            "pattern": "teasing_and_pounding",
+            "speed": 70,
+            "depth": 75,
+            "intensity": 50,
+            "duration_ms": 6000
+        },
+        {
+            "probability": 0.3,
+            "pattern": "simple_stroke",
+            "speed": 80,
+            "depth": 85,
+            "duration_ms": 5000
+        },
+        {
+            "probability": 0.25,
+            "pattern": "half_n_half",
+            "speed": 65,
+            "depth": 90,
+            "intensity": 40,
+            "duration_ms": 7000
+        },
+        {
+            "probability": 0.15,
+            "pattern": "deeper",
+            "speed": 55,
+            "depth": 95,
+            "intensity": 60,
+            "duration_ms": 10000
+        }
+    ]
+}
