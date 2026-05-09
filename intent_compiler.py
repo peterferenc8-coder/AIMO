@@ -88,6 +88,16 @@ class IntentCompiler:
                 f"Unknown intent: {intent!r}. "
                 f"Known: {list(self._registry.keys())}"
             )
+        if intent == "stop":
+            return CompiledCommand(
+                pattern="stop",
+                speed=0,
+                depth=None, 
+                base=None,
+                intensity=0.0,
+                duration_ms=5000, 
+                intent="stop",
+            )
 
         bands = self._registry[intent]
 
