@@ -1,0 +1,36 @@
+{
+    "name": "settle_hard",
+    "description": "Firm settle after high intensity. Not gentle — substantial, but stable and predictable. The storm has passed but the subject is still held. No escalation, no surprises, just presence.",
+    "intensity_range": [0.6, 1.0],
+    "pattern": "simple_stroke",
+    "speed": 45,
+    "depth": 55,
+    "base": 10,
+    "duration_ms": 8000,
+    "easing": "sine_in_out",
+    "variations": [
+        {
+            "probability": 0.35,
+            "pattern": "simple_stroke",
+            "speed": 40,
+            "depth": 60,
+            "duration_ms": 9000
+        },
+        {
+            "probability": 0.35,
+            "pattern": "half_n_half",
+            "speed": 50,
+            "depth": 55,
+            "intensity": 10,
+            "duration_ms": 8000
+        },
+        {
+            "probability": 0.3,
+            "pattern": "teasing_and_pounding",
+            "speed": 45,
+            "depth": 50,
+            "intensity": -20,
+            "duration_ms": 10000
+        }
+    ]
+}

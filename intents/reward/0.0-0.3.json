@@ -1,0 +1,39 @@
+{
+    "name": "reward_gentle",
+    "description": "Generous but measured. The subject is finally being given what they want, but slowly — savoring the gift. Warm, filling, gratifying without overwhelming.",
+    "intensity_range": [0.0, 0.3],
+    "pattern": "simple_stroke",
+    "speed": 55,
+    "depth": 65,
+    "base": 25,
+    "duration_ms": 8000,
+    "easing": "sine_in_out",
+    "variations": [
+        {
+            "probability": 0.4,
+            "pattern": "simple_stroke",
+            "speed": 50,
+            "depth": 70,
+            "base": 25,
+            "duration_ms": 9000
+        },
+        {
+            "probability": 0.35,
+            "pattern": "half_n_half",
+            "speed": 60,
+            "depth": 60,
+            "base": 25,
+            "intensity": 20,
+            "duration_ms": 8000
+        },
+        {
+            "probability": 0.25,
+            "pattern": "deeper",
+            "speed": 55,
+            "depth": 65,
+            "base": 25,
+            "intensity": 30,
+            "duration_ms": 10000
+        }
+    ]
+}

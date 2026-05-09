@@ -1,0 +1,49 @@
+{
+    "name": "reward_hard",
+    "description": "Maximum reward. Overwhelming, complete, everything at once. The insist variation locks them in place with unwavering vibrational pressure — the ultimate gratification.",
+    "intensity_range": [0.6, 1.0],
+    "pattern": "teasing_and_pounding",
+    "speed": 85,
+    "depth": 90,
+    "base": 25,
+    "intensity": 60,
+    "duration_ms": 7000,
+    "easing": "sine_in_out",
+    "variations": [
+        {
+            "probability": 0.3,
+            "pattern": "simple_stroke",
+            "speed": 90,
+            "depth": 95,
+            "base": 25,
+            "duration_ms": 8000
+        },
+        {
+            "probability": 0.25,
+            "pattern": "deeper",
+            "speed": 80,
+            "depth": 100,
+            "base": 25,
+            "intensity": 50,
+            "duration_ms": 9000
+        },
+        {
+            "probability": 0.25,
+            "pattern": "half_n_half",
+            "speed": 85,
+            "depth": 85,
+            "base": 25,
+            "intensity": 40,
+            "duration_ms": 8000
+        },
+        {
+            "probability": 0.2,
+            "pattern": "insist",
+            "speed": 75,
+            "depth": 80,
+            "base": 25,
+            "intensity": 80,
+            "duration_ms": 6000
+        }
+    ]
+}
