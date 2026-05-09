@@ -1,0 +1,54 @@
+[
+  {
+    "pct": 0,
+    "duration": 3000
+  },
+  {
+    "pct": 90,
+    "duration": 4000
+  },
+  {
+    "pct": 90,
+    "duration": 1000
+  },
+  {
+    "pct": 80,
+    "duration": 500
+  },
+  {
+    "pct": 90,
+    "duration": 500
+  },
+  {
+    "pct": 80,
+    "duration": 500
+  },
+  {
+    "pct": 90,
+    "duration": 500
+  },
+  {
+    "pct": 80,
+    "duration": 500
+  },
+  {
+    "pct": 100,
+    "duration": 500
+  },
+  {
+    "pct": 80,
+    "duration": 500
+  },
+  {
+    "pct": 100,
+    "duration": 500
+  },
+  {
+    "pct": 80,
+    "duration": 500
+  },
+  {
+    "pct": 100,
+    "duration": 500
+  }
+]

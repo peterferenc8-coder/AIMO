@@ -33,6 +33,10 @@ import tts
 
 import queue
 from device_bridge import get_bridge
+from config import PATTERNS_DIR
+
+CUSTOM_PATTERNS_DIR = PATTERNS_DIR / "custom"
+CUSTOM_PATTERNS_DIR.mkdir(parents=True, exist_ok=True)
 
 log = logging.getLogger(__name__)
 
@@ -553,6 +557,31 @@ def register_routes(app: Flask) -> None:
             log.error("TTS synthesis error: %s", exc)
             return jsonify({"ok": False, "error": str(exc)}), 500
 
+    #  ── Custom patterns ──────────────────────────────────────────────────────────
+    @app.get("/api/custom_patterns")
+    def api_list_custom_patterns():
+        """List all saved custom patterns."""
+        patterns = [p.stem for p in CUSTOM_PATTERNS_DIR.glob("*.json")]
+        return jsonify({"ok": True, "patterns": sorted(patterns)})
+
+    @app.get("/api/custom_patterns/<name>")
+    def api_get_custom_pattern(name):
+        """Load a specific custom pattern."""
+        p = CUSTOM_PATTERNS_DIR / f"{name}.json"
+        if p.exists():
+            with open(p, "r", encoding="utf-8") as f:
+                return jsonify({"ok": True, "points": json.load(f)})
+        return jsonify({"ok": False, "error": "Not found"}), 404
+
+    @app.post("/api/custom_patterns/<name>")
+    def api_save_custom_pattern(name):
+        """Save a new custom pattern."""
+        body = request.get_json(silent=True) or {}
+        points = body.get("points", [])
+        p = CUSTOM_PATTERNS_DIR / f"{name}.json"
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(points, f, indent=2)
+        return jsonify({"ok": True})
 
 def _validate_google_key(api_key: str, model: str) -> dict:
     connector = GoogleAIConnector(api_key=api_key, model=model)
@@ -562,5 +591,8 @@ def _validate_google_key(api_key: str, model: str) -> dict:
 def _validate_groq_key(api_key: str, model: str) -> dict:
     connector = GroqAIConnector(api_key=api_key, model=model)
     return connector.validate_api_key()
+
+
+
 
     
