@@ -72,8 +72,10 @@ function updateAllGauges(data) {
   if (data.homed) {
     const manualBtn = $('tab-btn-manual');
     const aiBtn = $('tab-btn-ai');
+    const customBtn = $('tab-btn-custom');
     if (manualBtn && manualBtn.disabled) manualBtn.disabled = false;
     if (aiBtn && aiBtn.disabled) aiBtn.disabled = false;
+    if (customBtn && customBtn.disabled) customBtn.disabled = false;
     window.dispatchEvent(new CustomEvent('device-homed'));
   }
 }
@@ -85,6 +87,9 @@ function openDeviceStream() {
     try {
       const data = JSON.parse(ev.data);
       if (data.type === 'position') updateAllGauges(data);
+      if (window.CustomTab && window.CustomTab.onDevicePositionUpdate) {
+          window.CustomTab.onDevicePositionUpdate(data);
+        }
     } catch (e) {
       console.error('SSE parse error:', e, ev.data);
     }
