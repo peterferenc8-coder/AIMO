@@ -12,6 +12,7 @@ from flask import Flask
 
 from config import LOG_LEVEL
 from routes import register_routes
+from devices.registry import set_active_device
 
 
 def create_app() -> Flask:
@@ -19,6 +20,11 @@ def create_app() -> Flask:
     _setup_logging()
     app = Flask(__name__)
     register_routes(app)
+    # Initialize default device on startup
+    try:
+        set_active_device("ossm")
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Failed to initialize default device: %s", exc)
     return app
 
 

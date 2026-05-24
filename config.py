@@ -2,7 +2,6 @@
 config.py
 ---------
 Central configuration for the OSSM Controller application.
-All magic numbers, paths, and tuneable settings live here.
 """
 
 import os
@@ -49,20 +48,18 @@ GENERATOR_SLEEP = 2.0     # seconds between buffer checks
 BIG_MODEL_MAX_RETRIES = int(os.getenv("BIG_MAX_RETRIES", "3"))
 BIG_MODEL_RETRY_DELAY = int(os.getenv("BIG_RETRY_DELAY", "30"))
 
-
-# ── Google Generative AI (Gemini/Gemma) ─────────────────────────────────────
-GOOGLE_MODEL     = os.getenv("GOOGLE_MODEL",    "gemma-4-31b-it")  # or "gemini-2.0-flash", "gemma-2-9b-it"
-GOOGLE_TIMEOUT   = int(os.getenv("GOOGLE_TIMEOUT", "240"))   # seconds
+# ── Google Generative AI ────────────────────────────────────────────────────
+GOOGLE_MODEL     = os.getenv("GOOGLE_MODEL",    "gemma-4-31b-it")
+GOOGLE_TIMEOUT   = int(os.getenv("GOOGLE_TIMEOUT", "240"))
 MODEL_OPTIONS    = [
     "gemma-4-26b-a4b-it",
     "gemma-4-31b-it",
 ]
 
-# ── Groq Generative AI ─────────────────────────────────────
-GROQ_MODEL       = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b") 
- # or "groq-2.0-8k-it"
-GROQ_TIMEOUT     = int(os.getenv("GROQ_TIMEOUT", "240"))   # seconds
-GROQ_MODEL_OPTIONS      = [
+# ── Groq Generative AI ──────────────────────────────────────────────────────
+GROQ_MODEL       = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+GROQ_TIMEOUT     = int(os.getenv("GROQ_TIMEOUT", "240"))
+GROQ_MODEL_OPTIONS = [
     "llama-3.1-8b-instant",
     "llama-3.3-70b-versatile",
     "meta-llama/llama-4-scout-17b-16e-instruct",
@@ -73,9 +70,7 @@ GROQ_MODEL_OPTIONS      = [
     "qwen/qwen3-32b"
 ]
 
-
-# Generation hyperparameters ─ raise temperature for more variety
-# Note: Google API uses different parameter names/ranges than Ollama
+# Generation hyperparameters
 GENERATION_OPTIONS = {
     "temperature":   float(os.getenv("GEN_TEMPERATURE",  "1.2")),
     "top_p":         float(os.getenv("GEN_TOP_P",        "0.90")),
@@ -91,19 +86,19 @@ FLASK_DEBUG = os.getenv("FLASK_DEBUG", "true").lower() == "true"
 FLASK_PORT  = int(os.getenv("FLASK_PORT", "5000"))
 FLASK_HOST  = os.getenv("FLASK_HOST", "0.0.0.0")
 
-# ── Logging ──────────────────────────────────────────────────────────────────────
+# ── Logging ────────────────────────────────────────────────────────────────────
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # ── Kokoro TTS ───────────────────────────────────────────────────────────────
 KOKORO_VOICE = os.getenv("KOKORO_VOICE", "af_heart")
 KOKORO_SPEED = float(os.getenv("KOKORO_SPEED", "1.0"))
-KOKORO_DEVICE = os.getenv("KOKORO_DEVICE", "auto")   # "auto", "cpu", "cuda"
+KOKORO_DEVICE = os.getenv("KOKORO_DEVICE", "auto")
 
 # ── Device bridge ────────────────────────────────────────────────────────────
 DEFAULT_DEVICE_WS_URL = os.getenv("DEVICE_WS_URL", "ws://localhost:8888")
 
 AI_TO_DEVICE_PATTERN_MAP = {
-    "stop": -1,                # handled specially
+    "stop": -1,
     "simple_stroke": 0,
     "teasing_and_pounding": 1,
     "robo_stroke": 2,
@@ -112,3 +107,9 @@ AI_TO_DEVICE_PATTERN_MAP = {
     "stop_n_go": 5,
     "insist": 6,
 }
+
+# ── Coyote BLE ───────────────────────────────────────────────────────────────
+COYOTE_BLE_NAME = os.getenv("COYOTE_BLE_NAME", "47L121000")
+COYOTE_SOFT_LIMIT_A = int(os.getenv("COYOTE_SOFT_LIMIT_A", "100"))
+COYOTE_SOFT_LIMIT_B = int(os.getenv("COYOTE_SOFT_LIMIT_B", "100"))
+COYOTE_DEFAULT_FREQ_MS = int(os.getenv("COYOTE_DEFAULT_FREQ_MS", "100"))

@@ -156,7 +156,7 @@ header h1 {
   flex-direction: column;
 }
 
-/* ── Error banner ── */
+/* ── Status banner ── */
 #error-banner {
   display: none;
   background: var(--accent-dim);
@@ -166,6 +166,18 @@ header h1 {
   font-family: var(--mono);
   font-size: 12px;
   flex-shrink: 0;
+}
+
+#error-banner.banner-info {
+  background: #18354d;
+  border-bottom-color: #4aa3ff;
+  color: #cfe8ff;
+}
+
+#error-banner.banner-error {
+  background: var(--accent-dim);
+  border-bottom-color: var(--accent);
+  color: #ffaaaa;
 }
 
 /* ── Setup Tab ── */

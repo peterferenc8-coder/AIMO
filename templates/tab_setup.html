@@ -1,56 +1,95 @@
 <div class="setup-layout">
   <div class="setup-main">
-    <div class="connection-bar">
-      <label for="device-url">Device URL</label>
-      <input type="text" id="device-url" value="ws://localhost:8888" />
-      <button class="btn" id="setup-connect">Connect</button>
-      <span id="device-conn-status" class="conn-status">Offline</span>
-      <span id="device-dot" class="dot"></span>
-      <span id="device-label">Offline</span>
+
+    <!-- Device Selector -->
+    <div class="connection-bar device-selector">
+      <label for="device-type-select">Device Type</label>
+      <select id="device-type-select">
+        <option value="ossm">OSSM (Linear Actuator)</option>
+        <option value="coyote">DG-Lab Coyote 3.0 (E-Stim BLE)</option>
+      </select>
+      <button class="btn" id="device-type-set">Set Device</button>
+      <span id="device-type-status" class="conn-status">OSSM</span>
     </div>
 
-    <div class="connection-bar">
-      <label>Linux Emulator</label>
-      <button class="btn" id="setup-launch-linux-emulator">Launch Serial Pair</button>
-      <span id="setup-emulator-status" class="conn-status">Not started</span>
-    </div>
+    <!-- OSSM Connection -->
+    <div id="setup-ossm-panel" class="device-panel">
+      <div class="connection-bar">
+        <label for="device-url">Device URL</label>
+        <input type="text" id="device-url" value="ws://localhost:8888" />
+        <button class="btn" id="setup-connect">Connect</button>
+        <span id="device-conn-status" class="conn-status">Offline</span>
+        <span id="device-dot" class="dot"></span>
+        <span id="device-label">Offline</span>
+      </div>
 
-    <div class="wizard-steps">
-      <div class="wizard-step" id="wizard-step-1">
-        <div class="step-number">1</div>
-        <div class="step-content">
-          <h3>Find Zero Position</h3>
-          <p>Jog the carriage to the back limit, then click Set Zero.</p>
-          <div class="step-actions">
-            <button class="btn btn-sm" id="setup-jog-bwd">▼ Back</button>
-            <button class="btn btn-sm" id="setup-jog-fwd">▲ Forward</button>
-            <button class="btn btn-sm btn-primary" id="setup-set-zero">Set Zero</button>
+      <div class="connection-bar">
+        <label>Linux Emulator</label>
+        <button class="btn" id="setup-launch-linux-emulator">Launch Serial Pair</button>
+        <span id="setup-emulator-status" class="conn-status">Not started</span>
+      </div>
+
+      <div class="wizard-steps">
+        <div class="wizard-step" id="wizard-step-1">
+          <div class="step-number">1</div>
+          <div class="step-content">
+            <h3>Find Zero Position</h3>
+            <p>Jog the carriage to the back limit, then click Set Zero.</p>
+            <div class="step-actions">
+              <button class="btn btn-sm" id="setup-jog-bwd">▼ Back</button>
+              <button class="btn btn-sm" id="setup-jog-fwd">▲ Forward</button>
+              <button class="btn btn-sm btn-primary" id="setup-set-zero">Set Zero</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="wizard-step disabled" id="wizard-step-2">
+          <div class="step-number">2</div>
+          <div class="step-content">
+            <h3>Find Max Position</h3>
+            <p>Jog the carriage to the front limit, then click Set Max.</p>
+            <div class="step-actions">
+              <button class="btn btn-sm" id="setup-jog-fwd-2">▲ Forward</button>
+              <button class="btn btn-sm" id="setup-jog-bwd-2">▼ Back</button>
+              <button class="btn btn-sm btn-primary" id="setup-set-max">Set Max</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="wizard-step disabled" id="wizard-step-3">
+          <div class="step-number">3</div>
+          <div class="step-content">
+            <h3>Initialize</h3>
+            <p>Return to zero and prepare the stroke engine.</p>
+            <div class="step-actions">
+              <button class="btn btn-sm btn-primary" id="setup-home">Home & Init</button>
+            </div>
           </div>
         </div>
       </div>
+    </div>
 
-      <div class="wizard-step disabled" id="wizard-step-2">
-        <div class="step-number">2</div>
-        <div class="step-content">
-          <h3>Find Max Position</h3>
-          <p>Jog the carriage to the front limit, then click Set Max.</p>
-          <div class="step-actions">
-            <button class="btn btn-sm" id="setup-jog-fwd-2">▲ Forward</button>
-            <button class="btn btn-sm" id="setup-jog-bwd-2">▼ Back</button>
-            <button class="btn btn-sm btn-primary" id="setup-set-max">Set Max</button>
-          </div>
-        </div>
+    <!-- Coyote Connection -->
+    <div id="setup-coyote-panel" class="device-panel" style="display:none;">
+      <div class="connection-bar">
+        <label for="coyote-ble-address">BLE Address</label>
+        <input type="text" id="coyote-ble-address" placeholder="XX:XX:XX:XX:XX:XX" />
+        <button class="btn" id="coyote-scan">Scan</button>
+        <button class="btn" id="coyote-connect">Connect</button>
+        <span id="coyote-conn-status" class="conn-status">Offline</span>
+        <span id="coyote-dot" class="dot"></span>
       </div>
 
-      <div class="wizard-step disabled" id="wizard-step-3">
-        <div class="step-number">3</div>
-        <div class="step-content">
-          <h3>Initialize</h3>
-          <p>Return to zero and prepare the stroke engine.</p>
-          <div class="step-actions">
-            <button class="btn btn-sm btn-primary" id="setup-home">Home & Init</button>
-          </div>
-        </div>
+      <div class="connection-bar">
+        <label>Scan Results</label>
+        <select id="coyote-scan-results" disabled>
+          <option value="">No devices found</option>
+        </select>
+      </div>
+
+      <div class="coyote-info">
+        <p>Connect to DG-Lab Coyote 3.0 via direct Bluetooth LE.</p>
+        <p>Ensure the device is powered on and not connected to another app.</p>
       </div>
     </div>
 
@@ -58,7 +97,7 @@
   </div>
 
   <div class="setup-device-panel">
-    <h4>Position</h4>
+    <h4 id="setup-panel-title">Position</h4>
     {% include 'block_device_gauge.html' %}
   </div>
 </div>
