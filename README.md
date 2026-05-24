@@ -33,15 +33,20 @@ Prompts are split into two layers under `prompts/`:
 
 - `prompts/base/` holds the immutable source files
 - `prompts/current/` holds editable overrides
+Prompts are split into layers under `prompts/`:
 
-When the app reads a prompt file, it checks `current` first and falls back to `base` if no override exists. Uploading a prompt writes to `current` using the same filename, and revert deletes the matching current overrides so the app goes back to the base files.
+- `prompts/base/` holds the immutable source files
+- `prompts/current/` holds editable overrides (created when the first override is saved)
+- `prompts/catalog/` contains packaged or additional prompt bundles (read-only)
+
+When the app reads a prompt file, it checks `current` first and falls back to `base` if no override exists. Uploading a prompt writes to `current` using the same filename (creating parent directories if needed), and the Revert action deletes matching files from `current` so the app returns to the base versions.
 
 Only filenames that already exist in `prompts/base/` are accepted for upload.
 
 ## Project Structure
 
 ```text
-ossm_controller/
+<project root>/
 ├── main.py               # Entry point
 ├── app_factory.py        # Flask app factory
 ├── routes.py             # All HTTP routes
@@ -58,7 +63,8 @@ ossm_controller/
 ├── device_emulator.py    # Standalone OSSM firmware emulator
 ├── prompts/
 │   ├── base/             # Immutable prompt templates, seeds, examples
-│   └── current/          # Editable user overrides (empty by default)
+│   ├── current/          # Editable user overrides (created on first save)
+│   └── catalog/          # Additional packaged prompts or bundles
 ├── patterns/             # One .json file per motion pattern
 ├── templates/
 │   ├── index.html        # GUI shell
@@ -75,7 +81,8 @@ ossm_controller/
         ├── setup.js
         ├── manual.js
         ├── ai.js
-        └── settings.js
+        ├── settings.js
+        └── custom.js
 ```
 
 ## Running
