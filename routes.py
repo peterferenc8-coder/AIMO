@@ -508,7 +508,9 @@ def register_routes(app: Flask) -> None:
                 while True:
                     try:
                         data = q.get(timeout=2)
-                        yield f"data: {json.dumps(data)}\n\n"
+                        # Ensure type: position is present for app.js compatibility
+                        payload = {'type': 'position', **data}
+                        yield f"data: {json.dumps(payload)}\n\n"
                     except queue.Empty:
                         yield f"data: {json.dumps({'type': 'ping'})}\n\n"
             finally:

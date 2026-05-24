@@ -317,6 +317,17 @@ class OSSMDevice(AbstractDevice):
 
         log.info("Device serial thread exiting")
 
+    # ── Override base notification to avoid double-fire ────────────────────────
+
+    def _update_state(self, **kwargs) -> None:
+        """Update state without notifying listeners — OSSM handles that via raw message forwarding."""
+        for k, v in kwargs.items():
+            if hasattr(self._state, k):
+                setattr(self._state, k, v)
+            else:
+                self._state.extra[k] = v
+        # Don't call _notify_listeners here; _handle_message does raw forwarding
+
     # ── Shared ─────────────────────────────────────────────────────────────────
 
     def _handle_message(self, data: dict):
@@ -328,3 +339,12 @@ class OSSMDevice(AbstractDevice):
                 homed=data.get("homed", False),
                 engineReady=data.get("engineReady", False),
             )
+            # Preserve the original message type for listeners
+            data = dict(data)
+            data.setdefault("type", "position")
+        # Forward the raw message to listeners (for SSE stream)
+        for cb in list(self._listeners):
+            try:
+                cb(data)
+            except Exception:
+                pass
