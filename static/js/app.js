@@ -30,13 +30,28 @@ checkHealth();
 setInterval(checkHealth, 15000);
 
 // ── Error banner ───────────────────────────────────────────────────────────
-function showError(msg) {
+function showBanner(msg, kind = 'error') {
   const banner = $('error-banner');
+  if (!banner) return;
   banner.style.display = 'block';
-  banner.textContent = '⚠ ' + msg;
+  banner.classList.remove('banner-error', 'banner-info');
+  banner.classList.add(kind === 'info' ? 'banner-info' : 'banner-error');
+  banner.textContent = (kind === 'info' ? 'ℹ ' : '⚠ ') + msg;
 }
+
+function showError(msg) {
+  showBanner(msg, 'error');
+}
+
+function showInfo(msg) {
+  showBanner(msg, 'info');
+}
+
 function hideError() {
-  $('error-banner').style.display = 'none';
+  const banner = $('error-banner');
+  if (!banner) return;
+  banner.style.display = 'none';
+  banner.classList.remove('banner-error', 'banner-info');
 }
 
 // ── Device stream (global, updates all gauge instances) ────────────────────
@@ -126,4 +141,4 @@ $('btn-global-stop').addEventListener('click', () => {
 });
 
 // ── Expose globals ─────────────────────────────────────────────────────────
-window.App = { showError, hideError, setDeviceStatus, openDeviceStream, closeDeviceStream, sendDeviceCmd };
+window.App = { showError, showInfo, hideError, setDeviceStatus, openDeviceStream, closeDeviceStream, sendDeviceCmd };

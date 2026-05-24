@@ -1,12 +1,13 @@
 """
 routes.py
 ---------
-All Flask HTTP routes for the dual-model OSSM Controller.
+All Flask HTTP routes for the OSSM Controller + Coyote BLE.
 """
 
 import json
 import logging
 import os
+import queue
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,12 @@ from flask import Flask, Response, abort, jsonify, render_template, request, sen
 
 from ai_connector import GoogleAIConnector, GroqAIConnector
 from config import AI_TO_DEVICE_PATTERN_MAP, GROQ_MODEL_OPTIONS, MODEL_OPTIONS
+from devices.registry import (
+    get_active_device,
+    get_active_type,
+    list_device_types,
+    set_active_device,
+)
 from orchestrator import SessionOrchestrator
 from prompt_store import (
     clear_current_prompts,
@@ -31,8 +38,6 @@ from prompt_builder import get_pacing_strategies, get_persona_moods
 from settings_store import load_settings, mask_secret, provider_presence, save_settings
 import tts
 
-import queue
-from device_bridge import get_bridge
 from config import PATTERNS_DIR
 
 CUSTOM_PATTERNS_DIR = PATTERNS_DIR / "custom"
@@ -114,7 +119,6 @@ class _SerialEmulatorLauncher:
                 self._stop_locked()
                 return {"ok": False, "error": f"Failed to start emulator: {exc}"}
 
-            # Give the emulator a brief moment to fail fast if startup is invalid.
             time.sleep(0.2)
             if self._emu_proc.poll() is not None:
                 self._stop_locked()
@@ -260,6 +264,28 @@ def register_routes(app: Flask) -> None:
             patterns=patterns,
         )
 
+    # ── Device Type Management ──────────────────────────────────────────────
+
+    @app.get("/api/device/types")
+    def api_device_types():
+        return jsonify({
+            "ok": True,
+            "types": list_device_types(),
+            "active": get_active_type(),
+        })
+
+    @app.post("/api/device/set")
+    def api_device_set():
+        body = request.get_json(silent=True) or {}
+        device_type = body.get("type", "ossm")
+        try:
+            dev = set_active_device(device_type)
+            return jsonify({"ok": True, "type": device_type, "name": dev.name})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    # ── Settings ──────────────────────────────────────────────────────────────
+
     @app.get("/api/settings")
     def api_settings():
         settings = load_settings()
@@ -377,12 +403,10 @@ def register_routes(app: Flask) -> None:
         _orchestrator.reload_prompts()
         return jsonify({"ok": True, "removed": removed})
 
+    # ── Session ───────────────────────────────────────────────────────────────
+
     @app.post("/api/start")
     def api_start():
-        """
-        Start a new session.
-        Body: { n_turns, persona, pacing, model }
-        """
         body = request.get_json(silent=True) or {}
         n_turns = int(body.get("n_turns", 20))
         persona = body.get("persona")
@@ -404,48 +428,112 @@ def register_routes(app: Flask) -> None:
 
     @app.post("/api/pause")
     def api_pause():
-        """Pause the current session."""
         return jsonify(_orchestrator.pause())
 
     @app.post("/api/resume")
     def api_resume():
-        """Resume a paused session."""
         return jsonify(_orchestrator.resume())
 
     @app.post("/api/clear")
     def api_clear():
-        """Wipe the current session."""
         return jsonify(_orchestrator.clear())
 
     @app.get("/api/poll")
     def api_poll():
-        """
-        Poll for newly displayed items.
-        Query: ?since=N  (number of items already received by client)
-        """
         since = request.args.get("since", 0, type=int)
         return jsonify(_orchestrator.poll(since_index=since))
 
     @app.get("/api/health")
     def api_health():
-        """Check AI backend connectivity."""
         status = _orchestrator.big_connector.health_check()
         code = 200 if status["ok"] else 503
         status.update(_orchestrator.status)
         return jsonify(status), code
 
-    _device = get_bridge()
+    # ── Generic Device Routes ───────────────────────────────────────────────
 
     @app.post("/api/device/connect")
     def api_device_connect():
         body = request.get_json(silent=True) or {}
         url = body.get("url", "ws://localhost:8888")
-        ok = _device.connect(url)
-        return jsonify({"ok": ok, "url": url, "state": _device.latest_state})
+        dev = get_active_device()
+        if not dev:
+            return jsonify({"ok": False, "error": "No device selected"}), 400
+        ok = dev.connect(url)
+        return jsonify({"ok": ok, "url": url, "state": dev.latest_state})
 
     @app.post("/api/device/disconnect")
     def api_device_disconnect():
-        _device.disconnect()
+        dev = get_active_device()
+        if dev:
+            dev.disconnect()
+        return jsonify({"ok": True})
+
+    @app.post("/api/device/home")
+    def api_device_home():
+        """Home the device by sending setZero (OSSM only)."""
+        dev = get_active_device()
+        if not dev:
+            return jsonify({"ok": False, "error": "No device"}), 400
+        if dev.device_type == "ossm":
+            dev.send_command({"cmd": "setZero"})
+        return jsonify({"ok": True})
+
+    @app.get("/api/device/state")
+    def api_device_state():
+        dev = get_active_device()
+        if not dev:
+            return jsonify({"ok": False, "error": "No device"}), 400
+        return jsonify({"ok": True, **dev.latest_state})
+
+    @app.get("/api/device/stream")
+    def api_device_stream():
+        def generate():
+            q = queue.Queue(maxsize=30)
+
+            def on_data(data):
+                try:
+                    q.put_nowait(data)
+                except queue.Full:
+                    pass
+
+            dev = get_active_device()
+            if not dev:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'No device'})}\n\n"
+                return
+
+            dev.add_listener(on_data)
+            try:
+                yield f"data: {json.dumps({'type': 'position', **dev.latest_state})}\n\n"
+                while True:
+                    try:
+                        data = q.get(timeout=2)
+                        yield f"data: {json.dumps(data)}\n\n"
+                    except queue.Empty:
+                        yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+            finally:
+                dev.remove_listener(on_data)
+
+        response = Response(generate(), mimetype="text/event-stream")
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["X-Accel-Buffering"] = "no"
+        return response
+
+    @app.post("/api/device/command")
+    def api_device_command():
+        """Send a raw command dict to the active device."""
+        body = request.get_json(silent=True) or {}
+        if "cmd" not in body:
+            return jsonify({"ok": False, "error": "Missing cmd"}), 400
+
+        dev = get_active_device()
+        if not dev:
+            return jsonify({"ok": False, "error": "No device"}), 400
+
+        if not dev.get_state().connected:
+            return jsonify({"ok": False, "error": "Device is not connected"}), 409
+
+        dev.send_command(body)
         return jsonify({"ok": True})
 
     @app.post("/api/device/serial_emulator/start")
@@ -460,64 +548,35 @@ def register_routes(app: Flask) -> None:
         _serial_emulator.stop()
         return jsonify({"ok": True})
 
-    @app.post("/api/device/home")
-    def api_device_home():
-        """Home the device by sending setZero."""
-        _device.send({"cmd": "setZero"})
-        return jsonify({"ok": True})
+    # ── Coyote-Specific Routes ──────────────────────────────────────────────
 
-    @app.get("/api/device/state")
-    def api_device_state():
-        return jsonify({"ok": True, **_device.latest_state})
+    @app.get("/api/coyote/scan")
+    def api_coyote_scan():
+        from devices.coyote_ble import CoyoteBLE
+        try:
+            results = CoyoteBLE.scan(timeout=5.0)
+            return jsonify({"ok": True, "devices": results})
+        except Exception as exc:
+            log.error("BLE scan error: %s", exc)
+            return jsonify({"ok": False, "error": str(exc)}), 500
 
-    @app.get("/api/device/stream")
-    def api_device_stream():
-        def generate():
-            q = queue.Queue(maxsize=30)
-
-            def on_data(data):
-                try:
-                    q.put_nowait(data)
-                except queue.Full:
-                    pass
-
-            _device.add_listener(on_data)
-            try:
-                yield f"data: {json.dumps({'type': 'position', **_device.latest_state})}\n\n"
-                while True:
-                    try:
-                        data = q.get(timeout=2)
-                        yield f"data: {json.dumps(data)}\n\n"
-                    except queue.Empty:
-                        yield f"data: {json.dumps({'type': 'ping'})}\n\n"
-            finally:
-                _device.remove_listener(on_data)
-
-        response = Response(generate(), mimetype="text/event-stream")
-        response.headers["Cache-Control"] = "no-cache"
-        response.headers["X-Accel-Buffering"] = "no"
-        return response
-
-    @app.post("/api/device/command")
-    def api_device_command():
-        """Send a raw command dict to the device."""
+    @app.post("/api/coyote/command")
+    def api_coyote_command():
         body = request.get_json(silent=True) or {}
-        if "cmd" not in body:
-            return jsonify({"ok": False, "error": "Missing cmd"}), 400
+        dev = get_active_device()
+        if not dev or dev.device_type != "coyote":
+            return jsonify({"ok": False, "error": "Coyote not active"}), 400
 
-        serial_obj = getattr(_device, "ser", None)
-        serial_connected = bool(serial_obj and getattr(serial_obj, "is_open", False))
-        if not _device.connected and not serial_connected:
-            return jsonify({"ok": False, "error": "Device is not connected"}), 409
+        if not dev.get_state().connected:
+            return jsonify({"ok": False, "error": "Coyote not connected"}), 409
 
-        _device.send(body)
-        return jsonify({"ok": True})
+        dev.send_command(body)
+        return jsonify({"ok": True, "state": dev.latest_state})
 
     # ── TTS Routes ──────────────────────────────────────────────────────────
 
     @app.get("/api/tts/audio/<string:cache_key>")
     def api_tts_audio(cache_key: str):
-        """Serve a cached TTS audio file by its cache key."""
         path = tts.get_audio_path(cache_key)
         if path is None or not path.exists():
             abort(404)
@@ -525,22 +584,15 @@ def register_routes(app: Flask) -> None:
 
     @app.get("/api/tts/cache")
     def api_tts_cache():
-        """List all cached TTS utterances (for debug/admin)."""
         return jsonify({"ok": True, "items": tts.list_cache()})
 
     @app.post("/api/tts/clear")
     def api_tts_clear():
-        """Delete all cached TTS audio files."""
         count = tts.clear_cache()
         return jsonify({"ok": True, "removed": count})
 
     @app.post("/api/tts/synthesize")
     def api_tts_synthesize():
-        """
-        On-demand TTS synthesis endpoint.
-        Body: { text: str, voice?: str, speed?: float }
-        Returns: { audio_url, words: [{word, start_ms, end_ms}], duration_ms }
-        """
         body = request.get_json(silent=True) or {}
         text = body.get("text", "")
         if not text or not text.strip():
@@ -557,16 +609,15 @@ def register_routes(app: Flask) -> None:
             log.error("TTS synthesis error: %s", exc)
             return jsonify({"ok": False, "error": str(exc)}), 500
 
-    #  ── Custom patterns ──────────────────────────────────────────────────────────
+    # ── Custom patterns ─────────────────────────────────────────────────────
+
     @app.get("/api/custom_patterns")
     def api_list_custom_patterns():
-        """List all saved custom patterns."""
         patterns = [p.stem for p in CUSTOM_PATTERNS_DIR.glob("*.json")]
         return jsonify({"ok": True, "patterns": sorted(patterns)})
 
     @app.get("/api/custom_patterns/<name>")
     def api_get_custom_pattern(name):
-        """Load a specific custom pattern."""
         p = CUSTOM_PATTERNS_DIR / f"{name}.json"
         if p.exists():
             with open(p, "r", encoding="utf-8") as f:
@@ -575,13 +626,13 @@ def register_routes(app: Flask) -> None:
 
     @app.post("/api/custom_patterns/<name>")
     def api_save_custom_pattern(name):
-        """Save a new custom pattern."""
         body = request.get_json(silent=True) or {}
         points = body.get("points", [])
         p = CUSTOM_PATTERNS_DIR / f"{name}.json"
         with open(p, "w", encoding="utf-8") as f:
             json.dump(points, f, indent=2)
         return jsonify({"ok": True})
+
 
 def _validate_google_key(api_key: str, model: str) -> dict:
     connector = GoogleAIConnector(api_key=api_key, model=model)
@@ -591,8 +642,3 @@ def _validate_google_key(api_key: str, model: str) -> dict:
 def _validate_groq_key(api_key: str, model: str) -> dict:
     connector = GroqAIConnector(api_key=api_key, model=model)
     return connector.validate_api_key()
-
-
-
-
-    

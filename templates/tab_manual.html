@@ -1,5 +1,6 @@
 <div class="manual-layout">
-  <div class="manual-controls">
+  <!-- OSSM Manual Controls -->
+  <div id="manual-ossm-panel" class="manual-controls">
     <div class="control-group">
       <label for="manual-pattern">Pattern</label>
       <select id="manual-pattern">
@@ -32,6 +33,64 @@
     <div class="manual-actions">
       <button class="btn btn-primary" id="manual-start">Start Pattern</button>
       <button class="btn btn-ghost" id="manual-stop">Stop</button>
+    </div>
+  </div>
+
+  <!-- Coyote Manual Controls -->
+  <div id="manual-coyote-panel" class="manual-controls" style="display:none;">
+    <div class="control-group">
+      <label for="coyote-waveform">Waveform</label>
+      <select id="coyote-waveform">
+        <option value="steady">Steady</option>
+        <option value="breathe">Breathe</option>
+        <option value="pulse">Pulse</option>
+        <option value="waves">Waves</option>
+      </select>
+    </div>
+
+    <div class="slider-group">
+      <label>Channel A Strength <span class="slider-value" id="val-coyote-a">0</span></label>
+      <input type="range" id="coyote-ch-a" min="0" max="200" value="0">
+    </div>
+
+    <div class="slider-group">
+      <label>Channel B Strength <span class="slider-value" id="val-coyote-b">0</span></label>
+      <input type="range" id="coyote-ch-b" min="0" max="200" value="0">
+    </div>
+
+    <div class="slider-group">
+      <label>Channel A Frequency <span class="slider-value" id="val-coyote-freq-a">100ms</span></label>
+      <input type="range" id="coyote-freq-a" min="10" max="1000" value="100">
+    </div>
+
+    <div class="slider-group">
+      <label>Channel B Frequency <span class="slider-value" id="val-coyote-freq-b">100ms</span></label>
+      <input type="range" id="coyote-freq-b" min="10" max="1000" value="100">
+    </div>
+
+    <div class="slider-group">
+      <label>Channel A Wave Strength <span class="slider-value" id="val-coyote-wave-a">50</span></label>
+      <input type="range" id="coyote-wave-a" min="0" max="100" value="50">
+    </div>
+
+    <div class="slider-group">
+      <label>Channel B Wave Strength <span class="slider-value" id="val-coyote-wave-b">50</span></label>
+      <input type="range" id="coyote-wave-b" min="0" max="100" value="50">
+    </div>
+
+    <div class="control-group">
+      <label for="coyote-soft-limit-a">Soft Limit A</label>
+      <input type="number" id="coyote-soft-limit-a" min="0" max="200" value="100">
+    </div>
+
+    <div class="control-group">
+      <label for="coyote-soft-limit-b">Soft Limit B</label>
+      <input type="number" id="coyote-soft-limit-b" min="0" max="200" value="100">
+    </div>
+
+    <div class="manual-actions">
+      <button class="btn btn-primary" id="coyote-zero">Zero Both</button>
+      <button class="btn btn-ghost" id="coyote-stop">Stop</button>
     </div>
   </div>
 
