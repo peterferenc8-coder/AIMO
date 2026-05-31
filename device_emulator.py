@@ -563,7 +563,7 @@ class MotorSimulator:
 
         elif self.mode == self.MODE_MOVE_TO:
             delta = self.target_pos - self.pos
-            if abs(delta) < 0.5 and abs(self.vel) < 0.5:
+            if abs(delta) < 0.5:
                 self.pos = self.target_pos
                 self.vel = 0.0
                 self.mode = self.MODE_IDLE
@@ -1179,14 +1179,46 @@ class DeviceEmulator:
 
             range_steps = self.g_maxPos - self.g_zeroPos
             target_steps = self.g_zeroPos + int((pct / 100.0) * range_steps)
+
+            # If the motor is already moving toward this exact target, do NOT
+            # interrupt it. Recomputing speed with the original segment duration
+            # but the now-smaller remaining distance produces a far lower cruise
+            # speed, causing the motor to abruptly decelerate and crawl the last
+            # few percent. Example: stream(100%, 500ms) arrives when the motor is
+            # already at 90% heading to 100% at 3226 steps/s -- recomputing for
+            # D=160 steps over 500ms gives only 320 steps/s, forcing a 10x
+            # slowdown. Skipping the redundant command lets the original move
+            # finish undisturbed at the correct speed.
+            if self.motor.mode == self.motor.MODE_MOVE_TO and \
+                    int(self.motor.target_pos) == target_steps:
+                return
+
             delta_steps = abs(target_steps - self.current_steps())
 
             if duration_ms <= 0 or delta_steps == 0:
                 self.motor.moveTo(target_steps, STREAM_MAX_SPEED_HZ, STREAM_ACCEL_HZ)
             else:
                 time_sec = duration_ms / 1000.0
-                required_speed = int(delta_steps / time_sec)
-                required_speed = constrain(required_speed, 10, STREAM_MAX_SPEED_HZ)
+                D = float(delta_steps)
+                A = float(STREAM_ACCEL_HZ)
+                T = time_sec
+
+                # Minimum time for a triangular velocity profile
+                # (accelerate to peak, then immediately decelerate)
+                t_min = 2.0 * math.sqrt(D / A) if A > 0.0 else 0.0
+
+                if T >= t_min:
+                    # Trapezoidal profile: solve T = D/v + v/A for cruise speed v
+                    discriminant = (T * A) ** 2 - 4.0 * D * A
+                    if discriminant >= 0.0:
+                        v = (T * A - math.sqrt(discriminant)) / 2.0
+                    else:
+                        v = D / T
+                else:
+                    # Triangular profile at maximum achievable speed
+                    v = math.sqrt(D * A) if A > 0.0 else D / T
+
+                required_speed = int(constrain(v, 10.0, float(STREAM_MAX_SPEED_HZ)))
                 self.motor.moveTo(target_steps, required_speed, STREAM_ACCEL_HZ)
 
         elif cmd == "startPattern":

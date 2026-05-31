@@ -205,10 +205,14 @@ class FunscriptPlayer:
                     self._running = False
                     self._notify("finished", 0)
                 return
-
             action = self.actions[self._current_index]
-            elapsed = time.monotonic() * 1000 - self._start_time
-            delay_ms = max(0.0, action.at - elapsed + self.latency_ms)
+            start_time = self._start_time  # snapshot under lock
+
+        # Sample elapsed as late as possible -- after releasing the lock and
+        # after any preceding blocking work -- so delay_ms is minimally stale
+        # when Timer.start() is called immediately below.
+        elapsed = time.monotonic() * 1000 - start_time
+        delay_ms = max(0.0, action.at - elapsed + self.latency_ms)
 
         self._timer = threading.Timer(delay_ms / 1000.0, self._execute_action, args=[action])
         self._timer.daemon = True
@@ -219,24 +223,32 @@ class FunscriptPlayer:
             if not self._running:
                 return
 
-            duration_ms = 500
+            duration_ms = 0
+            target_pos = float(action.pos)
             if self._current_index + 1 < len(self.actions):
-                duration_ms = self.actions[self._current_index + 1].at - action.at
+                next_a = self.actions[self._current_index + 1]
+                duration_ms = next_a.at - action.at
+                target_pos = float(next_a.pos)
 
             self._current_index += 1
 
-        pos = float(action.pos)
+        pos = target_pos
         if self.invert:
             pos = 100.0 - pos
 
-        self.send_command({
-            "cmd": "stream",
-            "pct": pos,
-            "duration": int(duration_ms)
-        })
+        # Schedule the next timer BEFORE send_command so that any latency in
+        # the send (WebSocket round-trip, queue blocking) does not eat into
+        # the scheduling window for the following action.
+        self._schedule_next()
+
+        if duration_ms > 0:
+            self.send_command({
+                "cmd": "stream",
+                "pct": pos,
+                "duration": int(duration_ms)
+            })
 
         self._notify("action", {"pos": pos, "duration_ms": duration_ms})
-        self._schedule_next()
 
     def _format_time(self, ms: int) -> str:
         s = ms // 1000
