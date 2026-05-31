@@ -188,6 +188,14 @@ class _SerialEmulatorLauncher:
 
 _serial_emulator = _SerialEmulatorLauncher()
 
+def _funscript_send(cmd: dict):
+    dev = get_active_device()
+    if dev and dev.get_state().connected:
+        dev.send_command(cmd)
+
+from funscript_player import FunscriptPlayer
+
+_funscript_player = FunscriptPlayer(send_command_fn=_funscript_send)
 
 def _keep_existing(value: str | None, fallback: str) -> str:
     if value is None:
@@ -635,6 +643,174 @@ def register_routes(app: Flask) -> None:
             json.dump(points, f, indent=2)
         return jsonify({"ok": True})
 
+    # ── Funscript ─────────────────────────────────────────────────────────────
+
+    FUNSCRIPT_DIR = PATTERNS_DIR / "funscripts"
+    FUNSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
+
+    @app.post("/api/funscript/upload")
+    def api_funscript_upload():
+        """Receive raw funscript JSON, save to disk, and load into player."""
+        body = request.get_json(silent=True) or {}
+        data = body.get("data")
+        filename = body.get("filename", "uploaded.funscript")
+
+        if not data or not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "Missing or invalid 'data' field"}), 400
+        if not data.get("actions"):
+            return jsonify({"ok": False, "error": "No actions found in funscript"}), 400
+
+        safe_name = os.path.basename(filename)
+        if not safe_name.endswith(".funscript"):
+            safe_name += ".funscript"
+
+        filepath = FUNSCRIPT_DIR / safe_name
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+
+            meta = _funscript_player.load_file(str(filepath))
+            return jsonify({
+                "ok": True,
+                "filepath": str(filepath),
+                **meta
+            })
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
+    @app.post("/api/funscript/play")
+    def api_funscript_play():
+        """
+        3rd-party endpoint: receive raw funscript JSON and immediately start playing.
+        Body: {"data": {...}, "offset_ms": 0}
+        """
+        body = request.get_json(silent=True) or {}
+        data = body.get("data")
+        offset_ms = int(body.get("offset_ms", 0))
+
+        if not data or not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "Missing or invalid 'data' field"}), 400
+        if not data.get("actions"):
+            return jsonify({"ok": False, "error": "No actions found in funscript"}), 400
+
+        dev = get_active_device()
+        if not dev:
+            return jsonify({"ok": False, "error": "No device connected"}), 400
+        if not dev.get_state().connected:
+            return jsonify({"ok": False, "error": "Device is not connected"}), 409
+
+        try:
+            meta = _funscript_player.load_data(data)
+            _funscript_player.start(offset_ms)
+            return jsonify({
+                "ok": True,
+                "status": "playing",
+                **meta
+            })
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
+    @app.post("/api/funscript/load")
+    def api_funscript_load():
+        """Load a saved funscript by filename or full path."""
+        body = request.get_json(silent=True) or {}
+        filepath = body.get("filepath")
+        filename = body.get("filename")
+
+        if not filepath and filename:
+            filepath = str(FUNSCRIPT_DIR / os.path.basename(filename))
+            if not filepath.endswith(".funscript"):
+                filepath += ".funscript"
+
+        if not filepath or not os.path.exists(filepath):
+            return jsonify({"ok": False, "error": "File not found"}), 404
+
+        try:
+            meta = _funscript_player.load_file(filepath)
+            with open(filepath, "r", encoding="utf-8") as f:
+                file_data = json.load(f)
+            return jsonify({
+                "ok": True,
+                "filepath": filepath,
+                "data": file_data,
+                **meta
+            })
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.get("/api/funscript/download/<name>")
+    def api_funscript_download(name):
+        """Return raw funscript JSON for a saved file."""
+        p = FUNSCRIPT_DIR / name
+        if not p.exists() or not p.name.endswith(".funscript"):
+            p = FUNSCRIPT_DIR / f"{name}.funscript"
+        if p.exists():
+            with open(p, "r", encoding="utf-8") as f:
+                return jsonify({"ok": True, "data": json.load(f)})
+        return jsonify({"ok": False, "error": "Not found"}), 404
+
+    @app.post("/api/funscript/start")
+    def api_funscript_start():
+        body = request.get_json(silent=True) or {}
+        offset_ms = int(body.get("offset_ms", 0))
+
+        dev = get_active_device()
+        if not dev:
+            return jsonify({"ok": False, "error": "No device connected"}), 400
+        if not dev.get_state().connected:
+            return jsonify({"ok": False, "error": "Device is not connected"}), 409
+
+        ok = _funscript_player.start(offset_ms)
+        return jsonify({"ok": ok, "status": "started" if ok else "empty", "offset_ms": offset_ms})
+
+    @app.post("/api/funscript/pause")
+    def api_funscript_pause():
+        _funscript_player.pause()
+        return jsonify({"ok": True, "status": "paused"})
+
+    @app.post("/api/funscript/resume")
+    def api_funscript_resume():
+        _funscript_player.resume()
+        return jsonify({"ok": True, "status": "resumed"})
+
+    @app.post("/api/funscript/seek")
+    def api_funscript_seek():
+        body = request.get_json(silent=True) or {}
+        pos = int(body.get("position_ms", 0))
+        _funscript_player.seek(pos)
+        return jsonify({"ok": True, "status": "seeked", "position_ms": pos})
+
+    @app.post("/api/funscript/stop")
+    def api_funscript_stop():
+        _funscript_player.stop()
+        return jsonify({"ok": True, "status": "stopped"})
+
+    @app.get("/api/funscript/status")
+    def api_funscript_status():
+        return jsonify({"ok": True, **_funscript_player.get_status()})
+
+    @app.get("/api/funscript/list")
+    def api_funscript_list():
+        patterns = [p.name for p in FUNSCRIPT_DIR.glob("*.funscript")]
+        return jsonify({"ok": True, "files": sorted(patterns)})
+    
+    @app.route('/api/funscript/config', methods=['POST'])
+    def funscript_config():
+        """Set or get FunscriptPlayer runtime config (latency & invert)."""
+        data = request.get_json() or {}
+
+        # Adjust this line to match however you access your FunscriptPlayer instance
+        # e.g. player = g.funscript_player  or  player = session_manager.funscript
+        player = _funscript_player  # <-- CHANGE THIS to your actual instance reference
+
+        if 'latency_ms' in data or 'invert' in data:
+            player.set_config(
+                latency_ms=data.get('latency_ms'),
+                invert=data.get('invert')
+            )
+        return jsonify(player.get_config())
+
+
 
 def _validate_google_key(api_key: str, model: str) -> dict:
     connector = GoogleAIConnector(api_key=api_key, model=model)
@@ -644,3 +820,4 @@ def _validate_google_key(api_key: str, model: str) -> dict:
 def _validate_groq_key(api_key: str, model: str) -> dict:
     connector = GroqAIConnector(api_key=api_key, model=model)
     return connector.validate_api_key()
+

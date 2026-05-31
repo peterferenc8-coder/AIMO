@@ -5,6 +5,10 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     if (btn.disabled) return;
     const tab = btn.dataset.tab;
+    // Stop funscript when leaving its tab
+    if (window.FunscriptTab && window.FunscriptTab.isPlaying() && tab !== 'funscript') {
+      window.FunscriptTab.stop();
+    }
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
@@ -88,9 +92,11 @@ function updateAllGauges(data) {
     const manualBtn = $('tab-btn-manual');
     const aiBtn = $('tab-btn-ai');
     const customBtn = $('tab-btn-custom');
+    const funscriptBtn = $('tab-btn-funscript');
     if (manualBtn && manualBtn.disabled) manualBtn.disabled = false;
     if (aiBtn && aiBtn.disabled) aiBtn.disabled = false;
     if (customBtn && customBtn.disabled) customBtn.disabled = false;
+    if (funscriptBtn && funscriptBtn.disabled) funscriptBtn.disabled = false;
     window.dispatchEvent(new CustomEvent('device-homed'));
   }
 }
