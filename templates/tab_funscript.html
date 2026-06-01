@@ -1,67 +1,82 @@
-<div class="manual-layout" style="flex-direction: column; gap: 15px;">
-  <!-- Top Control Bar -->
-  <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-    <input type="file" id="funscript-file-input" accept=".funscript" style="display: none;">
-    <button class="btn btn-sm" id="funscript-btn-load">Load .funscript</button>
-    <button class="btn btn-sm" id="funscript-btn-upload">Upload & Save</button>
-    <select id="funscript-saved-select" style="min-width: 150px;">
-      <option value="">-- Saved Funscripts --</option>
-    </select>
-    <span id="funscript-meta" style="color: #888; font-size: 12px;"></span>
+<div class="manual-layout" style="display: flex; flex-direction: row; gap: 15px; align-items: stretch;">
 
-    <div style="width: 1px; height: 24px; background: #333; margin: 0 5px;"></div>
+  <!-- LEFT: Controls (fixed width) -->
+  <div class="manual-controls" style="flex: 0 0 260px; display: flex; flex-direction: column; gap: 12px; min-width: 260px; overflow-y: auto;">
 
-    <input type="file" id="video-file-input" accept="video/*" style="display: none;">
-    <button class="btn btn-sm" id="video-btn-load" style="background: #2d2d44; border-color: #444;">Load Video</button>
-    <button class="btn btn-sm" id="video-btn-upload" style="background: #2d2d44; border-color: #444;">Upload & Save</button>
-    <select id="video-saved-select" style="min-width: 140px;">
-      <option value="">-- Saved Videos --</option>
-    </select>
-    <span id="video-filename" style="color: #888; font-size: 12px;"></span>
-  </div>
+    <!-- Funscript files -->
+    <div style="display: flex; flex-direction: column; gap: 6px;">
+      <div style="display: flex; gap: 6px;">
+        <input type="file" id="funscript-file-input" accept=".funscript" style="display: none;">
+        <button class="btn btn-sm" id="funscript-btn-load" style="flex: 1;">Load .funscript</button>
+        <button class="btn btn-sm" id="funscript-btn-upload" style="flex: 1;">Upload & Save</button>
+      </div>
+      <select id="funscript-saved-select" style="width: 100%; background: #1e1e2e; color: #fff; border: 1px solid #333; border-radius: 4px; padding: 4px;">
+        <option value="">-- Saved Funscripts --</option>
+      </select>
+      <span id="funscript-meta" style="color: #888; font-size: 12px;"></span>
+    </div>
 
-  <!-- Main Content: Left controls, Middle video, Right canvas -->
-  <div style="display: flex; gap: 15px; flex: 1; min-height: 0; align-items: stretch;">
-    <!-- Left: Playback controls & config -->
-    <div style="flex: 0 0 240px; display: flex; flex-direction: column; gap: 12px;">
-      <div class="control-group" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+    <!-- Video files -->
+    <div style="display: flex; flex-direction: column; gap: 6px;">
+      <div style="display: flex; gap: 6px;">
+        <input type="file" id="video-file-input" accept="video/*" style="display: none;">
+        <button class="btn btn-sm" id="video-btn-load" style="flex: 1; background: #2d2d44; border-color: #444;">Load Video</button>
+        <button class="btn btn-sm" id="video-btn-upload" style="flex: 1; background: #2d2d44; border-color: #444;">Upload & Save</button>
+      </div>
+      <select id="video-saved-select" style="width: 100%; background: #1e1e2e; color: #fff; border: 1px solid #333; border-radius: 4px; padding: 4px;">
+        <option value="">-- Saved Videos --</option>
+      </select>
+      <span id="video-filename" style="color: #888; font-size: 12px;"></span>
+    </div>
+
+    <!-- Playback controls -->
+    <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px;">
+      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
         <label style="color: #888; font-size: 12px;">Latency (ms):</label>
         <input type="number" id="funscript-latency" value="0" step="10" style="width: 60px; background: #1e1e2e; color: #fff; border: 1px solid #333; border-radius: 4px; padding: 4px;">
-        <label style="color: #888; font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer; margin-left: 5px;">
+        <label style="color: #888; font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer; margin-left: auto;">
           <input type="checkbox" id="funscript-invert" style="cursor: pointer;"> Invert
         </label>
       </div>
 
-      <div class="control-group" style="display: flex; gap: 8px; align-items: center;">
-        <button class="btn btn-primary" id="funscript-btn-play">▶ Play</button>
-        <button class="btn btn-secondary" id="funscript-btn-pause">⏸ Pause</button>
-        <button class="btn btn-ghost" id="funscript-btn-stop">⏹ Stop</button>
+      <div style="display: flex; gap: 6px;">
+        <button class="btn btn-primary" id="funscript-btn-play" style="flex: 1;">▶ Play</button>
+        <button class="btn btn-secondary" id="funscript-btn-pause" style="flex: 1;">⏸ Pause</button>
+        <button class="btn btn-ghost" id="funscript-btn-stop" style="flex: 1;">⏹ Stop</button>
       </div>
 
       <div style="display: flex; align-items: center; gap: 8px;">
-        <span style="color: #888; font-size: 12px;">Seek:</span>
+        <span style="color: #888; font-size: 11px; white-space: nowrap;">Seek:</span>
         <input type="range" id="funscript-seek" min="0" max="100" value="0" style="flex: 1;">
-        <span id="funscript-time" style="color: #888; font-size: 12px; min-width: 80px; text-align: right;">0:00 / 0:00</span>
       </div>
 
-      <div id="funscript-status" style="color: #00ffcc; font-size: 13px; min-height: 20px;"></div>
-    </div>
-
-    <!-- Middle: Video Player -->
-    <div style="flex: 2; display: flex; justify-content: center; align-items: center; min-width: 0; background: #0a0a0a; border-radius: 8px; border: 1px solid #333; overflow: hidden;">
-      <video id="funscript-video" controls preload="auto" style="width: 100%; height: 100%; max-height: 420px; display: block;"></video>
-    </div>
-
-    <!-- Right: Funscript bar display + Device panel -->
-    <div style="flex: 0 0 280px; display: flex; flex-direction: column; gap: 10px;">
-      <div style="background: #1e1e2e; border: 1px solid #333; border-radius: 8px; padding: 10px;">
-        <canvas id="funscript-canvas" width="280" height="180" style="width: 100%; height: 180px; display: block;"></canvas>
-      </div>
-      {% include 'block_device_gauge.html' %}
-      <div style="text-align: center;">
-        <div style="font-size: 11px; color: #666;">Target Position</div>
-        <div id="funscript-target-pct" style="font-size: 24px; font-weight: bold; color: #ff4757;">--</div>
-      </div>
+      <div id="funscript-time" style="color: #888; font-size: 12px; text-align: center;">0:00 / 0:00</div>
+      <div id="funscript-status" style="color: #00ffcc; font-size: 13px; text-align: center; min-height: 20px;"></div>
     </div>
   </div>
+
+  <!-- CENTER: Video (no native controls, click to toggle) -->
+  <div style="flex: 1; display: flex; align-items: center; justify-content: center; background: #0a0a0a; border-radius: 8px; border: 1px solid #333; min-width: 0; overflow: hidden; position: relative;">
+    <video id="funscript-video" preload="auto" style="width: 100%; height: 100%; max-height: 100%; display: block; object-fit: contain; cursor: pointer;"></video>
+    <div id="video-play-overlay" style="position: absolute; pointer-events: none; display: none; align-items: center; justify-content: center;">
+      <div style="width: 60px; height: 60px; background: rgba(0,0,0,0.6); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 24px;">▶</div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Rolling heatmap + Device Gauge (fixed width) -->
+  <div class="manual-device-panel" style="flex: 0 0 300px; display: flex; flex-direction: column; gap: 10px; min-width: 300px;">
+    <div style="background: #1e1e2e; border: 1px solid #333; border-radius: 8px; padding: 8px;">
+      <canvas id="funscript-canvas" width="280" height="180" style="width: 100%; height: auto; display: block;"></canvas>
+    </div>
+
+    <div style="flex: 1; min-height: 0; overflow: auto;">
+      {% include 'block_device_gauge.html' %}
+    </div>
+
+    <div style="text-align: center; padding: 10px; background: #1e1e2e; border-radius: 6px; border: 1px solid #333;">
+      <div style="font-size: 11px; color: #666;">Target Position</div>
+      <div id="funscript-target-pct" style="font-size: 24px; font-weight: bold; color: #ff4757;">--</div>
+    </div>
+  </div>
+
 </div>
