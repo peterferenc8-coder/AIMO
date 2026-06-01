@@ -809,6 +809,34 @@ def register_routes(app: Flask) -> None:
                 invert=data.get('invert')
             )
         return jsonify(player.get_config())
+    
+    # ── Funscript Videos ─────────────────────────────────────────────────────
+
+    VIDEOS_DIR = PATTERNS_DIR / "videos"
+    VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+
+    @app.post("/api/funscript/video/upload")
+    def api_funscript_video_upload():
+        upload = request.files.get("file")
+        if not upload:
+            return jsonify({"ok": False, "error": "Missing file"}), 400
+        safe_name = os.path.basename(upload.filename or "video.mp4")
+        filepath = VIDEOS_DIR / safe_name
+        upload.save(filepath)
+        return jsonify({"ok": True, "filepath": str(filepath), "filename": safe_name})
+
+    @app.get("/api/funscript/videos")
+    def api_funscript_videos():
+        exts = {".mp4", ".webm", ".mov", ".mkv", ".avi"}
+        files = [f.name for f in VIDEOS_DIR.iterdir() if f.suffix.lower() in exts]
+        return jsonify({"ok": True, "files": sorted(files)})
+
+    @app.get("/api/funscript/video/<name>")
+    def api_funscript_video_download(name):
+        p = VIDEOS_DIR / os.path.basename(name)
+        if p.exists():
+            return send_file(p)
+        return jsonify({"ok": False, "error": "Not found"}), 404
 
 
 
