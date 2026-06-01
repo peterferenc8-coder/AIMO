@@ -31,15 +31,12 @@ class FunscriptPlayer:
 
     def _extract_actions(self, data: dict) -> list:
         """Extract stroke actions from funscript, handling multi-axis format."""
-        # Try top-level actions first
         raw = data.get("actions")
         if raw and len(raw) > 0:
             return raw
 
-        # Multi-axis format: axes[0] is usually the stroke (R0 or L0)
         axes = data.get("axes", [])
         if axes and len(axes) > 0:
-            # Use first axis that has actions, prefer R0 or L0
             for axis in axes:
                 axis_actions = axis.get("actions", [])
                 if axis_actions:
@@ -94,6 +91,9 @@ class FunscriptPlayer:
         if not self.actions:
             return False
         with self._lock:
+            if self._timer:
+                self._timer.cancel()
+                self._timer = None
             self._start_time = time.monotonic() * 1000 - offset_ms
             self._paused_offset_ms = 0.0
             self._running = True
@@ -114,13 +114,13 @@ class FunscriptPlayer:
             if self._timer:
                 self._timer.cancel()
                 self._timer = None
-        # Send stop to device to halt any in-progress motion
         self.send_command({"cmd": "stop"})
         self._notify("paused", int(self._paused_offset_ms))
 
     def resume(self):
-        if self._paused_offset_ms > 0 or self._current_index > 0:
-            self.start(int(self._paused_offset_ms))
+        if self._running:
+            return False
+        return self.start(int(self._paused_offset_ms))
 
     def seek(self, target_ms: int):
         with self._lock:
@@ -132,6 +132,10 @@ class FunscriptPlayer:
                 if self._timer:
                     self._timer.cancel()
                     self._timer = None
+            else:
+                # If paused (or never started), update the resume offset so
+                # resume() continues from the seeked position.
+                self._paused_offset_ms = float(target_ms)
         self._notify("seeked", target_ms)
         if self._running:
             self._schedule_next()
@@ -208,9 +212,6 @@ class FunscriptPlayer:
             action = self.actions[self._current_index]
             start_time = self._start_time  # snapshot under lock
 
-        # Sample elapsed as late as possible -- after releasing the lock and
-        # after any preceding blocking work -- so delay_ms is minimally stale
-        # when Timer.start() is called immediately below.
         elapsed = time.monotonic() * 1000 - start_time
         delay_ms = max(0.0, action.at - elapsed + self.latency_ms)
 
@@ -236,9 +237,6 @@ class FunscriptPlayer:
         if self.invert:
             pos = 100.0 - pos
 
-        # Schedule the next timer BEFORE send_command so that any latency in
-        # the send (WebSocket round-trip, queue blocking) does not eat into
-        # the scheduling window for the following action.
         self._schedule_next()
 
         if duration_ms > 0:
