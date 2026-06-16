@@ -35,6 +35,7 @@ from config import (
     LOW_WATERMARK,
     MODEL_OPTIONS,
     SMALL_MODEL,
+    VIDEO_CHANCE,
 )
 from ai_connector import GoogleAIConnector, GroqAIConnector
 from brain import Brain
@@ -229,6 +230,7 @@ class SessionOrchestrator:
                 # Compile any narrative intents returned by the seed prompt
                 compiled_turns: list[Turn] = []
                 for turn in turns:
+                    self._maybe_inject_video(turn)
                     if self._is_video_intent(turn):
                         pass  # resolved to a clip in _build_display_item
                     elif turn.intent and turn.ai_intensity is not None:
@@ -483,6 +485,7 @@ class SessionOrchestrator:
             # NEW: Compile intents to device commands
             compiled_turns = []
             for turn in turns:
+                self._maybe_inject_video(turn)
                 if self._is_video_intent(turn):
                     # play_video is resolved to a Stash clip in _build_display_item;
                     # it carries no device command of its own.
@@ -587,6 +590,22 @@ class SessionOrchestrator:
     @staticmethod
     def _is_video_intent(turn: Turn) -> bool:
         return turn.intent == "play_video"
+
+    def _maybe_inject_video(self, turn: Turn) -> None:
+        """
+        Randomly promote a normal turn into a play_video interlude.
+
+        The LLM almost never selects play_video on its own, so we force it at
+        VIDEO_CHANCE per turn. Only do this when Stash is configured (otherwise
+        the turn would resolve to no clip and the device would idle).
+        """
+        if VIDEO_CHANCE <= 0 or self._is_video_intent(turn):
+            return
+        if not self.stash.is_configured():
+            return
+        if random.random() < VIDEO_CHANCE:
+            log.info("Injecting play_video interlude (chance=%.2f)", VIDEO_CHANCE)
+            turn.intent = "play_video"
 
     def _resolve_video(self, turn: Turn) -> dict | None:
         """Pick a random tagged Stash scene for a play_video turn."""

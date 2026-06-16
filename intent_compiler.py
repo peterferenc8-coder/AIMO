@@ -83,20 +83,23 @@ class IntentCompiler:
             intensity: 0.0 to 1.0
             jitter:    ±random offset applied to intensity before band selection
         """
-        if intent not in self._registry:
-            raise ValueError(
-                f"Unknown intent: {intent!r}. "
-                f"Known: {list(self._registry.keys())}"
-            )
+        # "stop" is a built-in intent: the machine halts. It has no band JSON,
+        # so handle it before the registry lookup (which would otherwise raise).
         if intent == "stop":
             return CompiledCommand(
                 pattern="stop",
                 speed=0,
-                depth=None, 
-                base=None,
-                intensity=0.0,
-                duration_ms=5000, 
+                depth=0,
+                base=0,
+                ai_intensity=0.0,
+                duration_ms=5000,
                 intent="stop",
+            )
+
+        if intent not in self._registry:
+            raise ValueError(
+                f"Unknown intent: {intent!r}. "
+                f"Known: {list(self._registry.keys())}"
             )
 
         bands = self._registry[intent]

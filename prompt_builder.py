@@ -254,5 +254,6 @@ def _pick_or_random(selected: str | None, available: list[str]) -> str:
     return ""   
 
 def get_opening_intents() -> list[str]:
-    # Could load from file, or derive from intent compiler
-    return ["tease", "ground", "stop"]
+    # Must be real intents (an intents/<name>/ dir, or the built-in "stop");
+    # "ground" had no definition and silently failed to compile.
+    return ["tease", "settle", "stop"]
