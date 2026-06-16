@@ -125,16 +125,12 @@ class OSSMDevice(AbstractDevice):
 
         device_cmds: list[dict] = []
 
-        if pattern == "stop":
-            device_cmds.append({"cmd": "stopPattern"})
-            self._pattern_running = False
-        elif pattern is not None:
-            idx = AI_TO_DEVICE_PATTERN_MAP.get(pattern, 0)
-            device_cmds.append({"cmd": "setPattern", "value": idx})
-            if not self._pattern_running:
-                device_cmds.append({"cmd": "startPattern"})
-                self._pattern_running = True
-
+        # Apply motion parameters BEFORE selecting/starting the pattern.
+        # startPattern() on the device pushes the current depth/stroke/speed
+        # globals into the engine, so these must already be set — otherwise the
+        # pattern starts at the stale default depth (100%) and the carriage
+        # lunges fully "in" before the real (lower) depth takes effect, which
+        # reads as the gauge starting at 100% and slowly drifting to 0.
         if speed is not None:
             device_cmds.append({"cmd": "setSpeedPct", "value": speed})
 
@@ -151,6 +147,17 @@ class OSSMDevice(AbstractDevice):
 
         if intensity is not None:
             device_cmds.append({"cmd": "setSensation", "value": intensity})
+
+        # Now select/start (or stop) the pattern, with parameters already in place.
+        if pattern == "stop":
+            device_cmds.append({"cmd": "stopPattern"})
+            self._pattern_running = False
+        elif pattern is not None:
+            idx = AI_TO_DEVICE_PATTERN_MAP.get(pattern, 0)
+            device_cmds.append({"cmd": "setPattern", "value": idx})
+            if not self._pattern_running:
+                device_cmds.append({"cmd": "startPattern"})
+                self._pattern_running = True
 
         if manual_cmds:
             for cmd in manual_cmds:

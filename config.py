@@ -116,6 +116,11 @@ STASH_URL     = os.getenv("STASH_URL", "")          # e.g. http://192.168.1.50:9
 STASH_API_KEY = os.getenv("STASH_API_KEY", "")      # Stash API key (Settings > Security)
 STASH_TAG     = os.getenv("STASH_TAG", "playable")  # only scenes with this tag are playable
 
+# Probability (0.0-1.0) that any given turn is turned into a play_video interlude.
+# The LLM rarely picks play_video on its own, so the orchestrator injects it at
+# this rate to keep video clips appearing roughly this often.
+VIDEO_CHANCE  = float(os.getenv("VIDEO_CHANCE", "0.10"))
+
 # ── Coyote BLE ───────────────────────────────────────────────────────────────
 COYOTE_BLE_NAME = os.getenv("COYOTE_BLE_NAME", "47L121000")
 COYOTE_SOFT_LIMIT_A = int(os.getenv("COYOTE_SOFT_LIMIT_A", "100"))
