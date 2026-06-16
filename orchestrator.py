@@ -362,7 +362,7 @@ class SessionOrchestrator:
                     self._displayed.append(item)
 
                     if item.commands:
-                        self.device_bridge.apply_ai_commands(item.commands)
+                        get_bridge().apply_ai_commands(item.commands)
 
                     log.debug(
                         "Displayed item %d  pending=%d",
