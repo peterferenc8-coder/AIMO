@@ -57,6 +57,31 @@
     </div>
 
     <div class="settings-card">
+      <h3>Stash Server</h3>
+      <p class="settings-note">Connect a Stash media server. The AI can cut to a random video clip tagged with the tag below; if the clip is interactive its funscript drives the device. Settings are checked immediately after saving.</p>
+
+      <div class="settings-field">
+        <label for="settings-stash-url">Stash URL</label>
+        <input type="text" id="settings-stash-url" autocomplete="off" spellcheck="false" placeholder="http://192.168.1.50:9999" />
+      </div>
+
+      <div class="settings-field">
+        <label for="settings-stash-key">Stash API Key</label>
+        <input type="password" id="settings-stash-key" autocomplete="off" spellcheck="false" placeholder="Enter a new key to replace the saved one" />
+        <div class="settings-status" id="settings-stash-status">Not loaded</div>
+      </div>
+
+      <div class="settings-field">
+        <label for="settings-stash-tag">Playable Tag</label>
+        <input type="text" id="settings-stash-tag" autocomplete="off" spellcheck="false" placeholder="playable" />
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn btn-primary" id="settings-update-stash">Save & Test Connection</button>
+      </div>
+    </div>
+
+    <div class="settings-card">
       <h3>Prompt Files</h3>
       <p class="settings-note">Files are resolved from <code>prompts/current</code> first and fall back to <code>prompts/base</code>. Upload names must match an existing base file.</p>
 
@@ -84,6 +109,7 @@
       <div class="settings-status-line"><span>Google validation</span><strong id="settings-google-validation-state">Unknown</strong></div>
       <div class="settings-status-line"><span>Groq key</span><strong id="settings-groq-key-state">Unknown</strong></div>
       <div class="settings-status-line"><span>Groq validation</span><strong id="settings-groq-validation-state">Unknown</strong></div>
+      <div class="settings-status-line"><span>Stash</span><strong id="settings-stash-validation-state">Unknown</strong></div>
       <div class="settings-status-line"><span>Current prompt set</span><strong id="settings-prompt-count">0 files</strong></div>
     </div>
   </div>

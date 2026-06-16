@@ -92,9 +92,33 @@ async function loadSettings() {
   const ttsCheckbox = $settings('settings-tts-enabled');
   if (ttsCheckbox) ttsCheckbox.checked = Boolean(data.tts_enabled);
 
+  applyStashState(data);
+
   syncModelLock('google');
   syncModelLock('groq');
   setSettingsMessage('Settings loaded.');
+}
+
+function applyStashState(data) {
+  const urlField = $settings('settings-stash-url');
+  if (urlField) urlField.value = data.stash_url || '';
+  const tagField = $settings('settings-stash-tag');
+  if (tagField) tagField.value = data.stash_tag || '';
+
+  const keyField = $settings('settings-stash-key');
+  if (keyField) keyField.value = '';
+  const keyStatus = $settings('settings-stash-status');
+  if (keyStatus) {
+    const masked = data.stash_api_key_masked;
+    keyStatus.textContent = masked ? `Saved key: ${masked}` : 'No saved key';
+  }
+
+  const validation = data.stash_validation;
+  setValidationState(
+    'stash',
+    validation?.ok ? (validation.message || 'Connected') : (validation?.message || 'Not validated'),
+    validation?.ok
+  );
 }
 
 function applySavedStates(data) {
@@ -163,6 +187,46 @@ async function updateProviderSettings(provider) {
   showValidationSummary(data);
 
   if (keyField) keyField.value = '';
+}
+
+async function updateStashSettings() {
+  const urlField = $settings('settings-stash-url');
+  const keyField = $settings('settings-stash-key');
+  const tagField = $settings('settings-stash-tag');
+
+  const payload = {
+    stash_url: urlField ? urlField.value.trim() : '',
+    stash_tag: tagField ? tagField.value.trim() : '',
+  };
+  // Only send the key when the user typed one (blank keeps the saved key).
+  if (keyField && keyField.value.trim()) {
+    payload.stash_api_key = keyField.value.trim();
+  }
+
+  const response = await fetch('/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+
+  if (!response.ok || !data.ok) {
+    setSettingsMessage(data.error || 'Failed to save Stash settings', true);
+    return;
+  }
+
+  applyStashState({
+    stash_url: data.saved?.stash_url,
+    stash_tag: data.saved?.stash_tag,
+    stash_api_key_masked: data.saved?.stash_api_key_masked,
+    stash_validation: data.stash_validation,
+  });
+
+  const v = data.stash_validation;
+  setSettingsMessage(
+    v?.ok ? `Stash connected — ${v.message}.` : `Stash: ${v?.message || 'validation failed'}.`,
+    !v?.ok
+  );
 }
 
 async function downloadSelectedPrompt() {
@@ -291,6 +355,9 @@ function wireSettingsEvents() {
 
   const updateTtsBtn = $settings('settings-update-tts');
   if (updateTtsBtn) updateTtsBtn.addEventListener('click', updateTTSSetting);
+
+  const updateStashBtn = $settings('settings-update-stash');
+  if (updateStashBtn) updateStashBtn.addEventListener('click', updateStashSettings);
 }
 
 wireSettingsEvents();

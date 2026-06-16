@@ -42,6 +42,7 @@ from prompt_builder import PromptBuilder
 from response_parser import Commands, ResponseParser, Turn
 from session_manager import SessionManager
 from settings_store import load_settings
+from stash_client import StashClient
 import tts
 
 log = logging.getLogger(__name__)
@@ -58,6 +59,10 @@ class DisplayItem:
     audio_url: str | None = None
     words: list[dict] = field(default_factory=list)   # [{word, start_ms, end_ms}]
     duration_ms: int = 0
+    # ── Video clip (play_video intent) ──────────────────────────────────────
+    # When set, the frontend plays this Stash clip instead of running device
+    # motion; the clip's funscript (if any) drives the device.
+    video: dict | None = None   # {scene_id, video_url, has_funscript, duration_ms, title}
 
     def as_dict(self) -> dict:
         return {
@@ -69,6 +74,7 @@ class DisplayItem:
             "audio_url": self.audio_url,
             "words": self.words,
             "duration_ms": self.duration_ms,
+            "video": self.video,
         }
 
 
@@ -112,6 +118,11 @@ class SessionOrchestrator:
 
         self.lock = threading.RLock()
         self.intent_compiler = IntentCompiler()
+        self.stash = StashClient(
+            url=self._settings.get("stash_url", ""),
+            api_key=self._settings.get("stash_api_key", ""),
+            tag=self._settings.get("stash_tag", ""),
+        )
         self.state = "idle"
 
         # Buffer: pending items waiting to be displayed
@@ -155,6 +166,12 @@ class SessionOrchestrator:
 
         active_model = self.big_connector.model
         self.big_connector = self._connector_for_model(active_model)
+
+        self.stash.configure(
+            url=self._settings.get("stash_url", ""),
+            api_key=self._settings.get("stash_api_key", ""),
+            tag=self._settings.get("stash_tag", ""),
+        )
 
         self.prompt_builder.reload()
         return self._settings
@@ -212,7 +229,9 @@ class SessionOrchestrator:
                 # Compile any narrative intents returned by the seed prompt
                 compiled_turns: list[Turn] = []
                 for turn in turns:
-                    if turn.intent and turn.ai_intensity is not None:
+                    if self._is_video_intent(turn):
+                        pass  # resolved to a clip in _build_display_item
+                    elif turn.intent and turn.ai_intensity is not None:
                         try:
                             compiled = self.intent_compiler.compile(
                                 intent=turn.intent,
@@ -361,7 +380,11 @@ class SessionOrchestrator:
                     self._display_index += 1
                     self._displayed.append(item)
 
-                    if item.commands:
+                    if item.video:
+                        # The clip's funscript drives the device (started by the
+                        # frontend); stop the current AI motion so it doesn't fight.
+                        self.device_bridge.apply_ai_commands({"pattern": "stop"})
+                    elif item.commands:
                         self.device_bridge.apply_ai_commands(item.commands)
 
                     log.debug(
@@ -372,8 +395,22 @@ class SessionOrchestrator:
 
             if should_sleep:
                 time.sleep(0.5)
+            elif item is not None and item.video:
+                # Hold the AI loop for the clip's real length so the next turn's
+                # device command doesn't interrupt playback mid-clip.
+                hold_ms = item.video.get("duration_ms") or 0
+                self._sleep_while_running(hold_ms / 1000.0 if hold_ms else self.DISPLAY_INTERVAL)
             else:
                 time.sleep(self.DISPLAY_INTERVAL)
+
+    def _sleep_while_running(self, seconds: float) -> None:
+        """Sleep up to `seconds`, waking early if the session is stopped/cleared."""
+        deadline = time.monotonic() + max(0.0, seconds)
+        while time.monotonic() < deadline:
+            with self.lock:
+                if self.state == "idle":
+                    return
+            time.sleep(min(0.5, deadline - time.monotonic()))
 
     # ── Generator loop (producer) ─────────────────────────────────────────
 
@@ -446,7 +483,11 @@ class SessionOrchestrator:
             # NEW: Compile intents to device commands
             compiled_turns = []
             for turn in turns:
-                if turn.intent and turn.ai_intensity is not None:
+                if self._is_video_intent(turn):
+                    # play_video is resolved to a Stash clip in _build_display_item;
+                    # it carries no device command of its own.
+                    pass
+                elif turn.intent and turn.ai_intensity is not None:
                     try:
                         compiled = self.intent_compiler.compile(
                             intent=turn.intent,
@@ -527,15 +568,47 @@ class SessionOrchestrator:
                 "duration_ms": 0,
             }
 
+        video = self._resolve_video(turn) if self._is_video_intent(turn) else None
+        # A video turn drives the device via its funscript, not via AI motion,
+        # so it carries no device command block.
+        commands = {} if video else turn.commands.as_dict()
+
         return DisplayItem(
             source="big",
             speech=speech,
-            commands=turn.commands.as_dict(),
+            commands=commands,
             raw=turn.raw,
             audio_url=tts_meta.get("audio_url"),
             words=tts_meta.get("words", []),
             duration_ms=tts_meta.get("duration_ms", 0),
+            video=video,
         )
+
+    @staticmethod
+    def _is_video_intent(turn: Turn) -> bool:
+        return turn.intent == "play_video"
+
+    def _resolve_video(self, turn: Turn) -> dict | None:
+        """Pick a random tagged Stash scene for a play_video turn."""
+        if not self.stash.is_configured():
+            log.warning("play_video intent but Stash is not configured — ignoring")
+            return None
+        try:
+            scene = self.stash.pick_random_scene(prefer_interactive=True)
+        except Exception as exc:  # noqa: BLE001 - never let Stash break the loop
+            log.warning("Stash scene lookup failed: %s", exc)
+            return None
+        if not scene:
+            log.warning("play_video intent but no tagged scenes available")
+            return None
+        log.info("play_video -> scene %s (%s)", scene["id"], scene["title"])
+        return {
+            "scene_id": scene["id"],
+            "title": scene["title"],
+            "video_url": f"/api/stash/video/{scene['id']}",
+            "has_funscript": scene["has_funscript"],
+            "duration_ms": scene["duration_ms"],
+        }
 
     def _handle_big_failure(self, reason: str) -> None:
         with self.lock:

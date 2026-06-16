@@ -223,6 +223,10 @@ def _saved_settings_payload(settings: dict) -> dict:
         "groq_key_present": bool(settings.get("groq_api_key", "")),
         "google_model": settings.get("google_model", ""),
         "groq_model": settings.get("groq_model", ""),
+        "stash_url": settings.get("stash_url", ""),
+        "stash_api_key_masked": mask_secret(settings.get("stash_api_key", "")),
+        "stash_key_present": bool(str(settings.get("stash_api_key", "") or "").strip()),
+        "stash_tag": settings.get("stash_tag", ""),
     }
 
 
@@ -315,6 +319,11 @@ def register_routes(app: Flask) -> None:
                 "google_validation": google_validation,
                 "groq_validation": groq_validation,
                 "tts_enabled": settings.get("tts_enabled", True),
+                "stash_url": settings.get("stash_url", ""),
+                "stash_api_key_masked": mask_secret(settings.get("stash_api_key", "")),
+                "stash_key_present": bool(str(settings.get("stash_api_key", "") or "").strip()),
+                "stash_tag": settings.get("stash_tag", ""),
+                "stash_validation": _validation_from_settings(settings, "stash_validation"),
                 "prompt_names": list_base_prompt_names(),
             }
         )
@@ -330,6 +339,11 @@ def register_routes(app: Flask) -> None:
             "google_model": _keep_existing(body.get("google_model"), current.get("google_model", "")),
             "groq_model": _keep_existing(body.get("groq_model"), current.get("groq_model", "")),
             "tts_enabled": body.get("tts_enabled", current.get("tts_enabled", True)),
+            "stash_url": (str(body["stash_url"]).strip() if "stash_url" in body
+                          else current.get("stash_url", "")).rstrip("/"),
+            "stash_api_key": _keep_existing(body.get("stash_api_key"), current.get("stash_api_key", "")),
+            "stash_tag": (str(body["stash_tag"]).strip() if "stash_tag" in body
+                          else current.get("stash_tag", "")),
         }
 
         google_validation = _validate_google_key(next_settings["google_api_key"], next_settings["google_model"])
@@ -341,12 +355,18 @@ def register_routes(app: Flask) -> None:
         save_settings(next_settings)
         _orchestrator.apply_settings(next_settings)
 
+        # Validate Stash against the freshly-applied client (network round-trip).
+        stash_validation = _orchestrator.stash.validate()
+        next_settings["stash_validation"] = stash_validation
+        save_settings(next_settings)
+
         return jsonify(
             {
                 "ok": True,
                 "saved": _saved_settings_payload(next_settings),
                 "google_validation": google_validation,
                 "groq_validation": groq_validation,
+                "stash_validation": stash_validation,
                 "tts_enabled": next_settings["tts_enabled"],
                 "prompt_names": list_base_prompt_names(),
             }
@@ -837,6 +857,74 @@ def register_routes(app: Flask) -> None:
         if p.exists():
             return send_file(p)
         return jsonify({"ok": False, "error": "Not found"}), 404
+
+    # ── Stash integration ──────────────────────────────────────────────────────
+
+    @app.get("/api/stash/scenes")
+    def api_stash_scenes():
+        """List (and optionally refresh) the tagged, playable Stash scenes."""
+        stash = _orchestrator.stash
+        if not stash.is_configured():
+            return jsonify({"ok": False, "error": "Stash is not configured"}), 400
+        force = request.args.get("refresh") == "1"
+        try:
+            scenes = stash.get_scenes(force=force)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 502
+        return jsonify({"ok": True, "count": len(scenes), "scenes": scenes})
+
+    @app.post("/api/stash/funscript/<scene_id>")
+    def api_stash_funscript(scene_id):
+        """Fetch a scene's funscript from Stash and load it into the player."""
+        stash = _orchestrator.stash
+        if not stash.is_configured():
+            return jsonify({"ok": False, "error": "Stash is not configured"}), 400
+        try:
+            data = stash.fetch_funscript(scene_id)
+            meta = _funscript_player.load_data(data)
+            return jsonify({"ok": True, "scene_id": scene_id, **meta})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 502
+
+    @app.get("/api/stash/video/<scene_id>")
+    def api_stash_video(scene_id):
+        """Proxy a scene's video stream from Stash (keeps the API key server-side)."""
+        stash = _orchestrator.stash
+        if not stash.is_configured():
+            return jsonify({"ok": False, "error": "Stash is not configured"}), 400
+
+        upstream = stash.open_stream(scene_id, request.headers.get("Range"))
+        status = getattr(upstream, "status", None) or getattr(upstream, "code", 200)
+
+        if status >= 400:
+            try:
+                upstream.close()
+            except Exception:
+                pass
+            return jsonify({"ok": False, "error": f"Stash returned {status}"}), 502
+
+        passthrough = ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges")
+        resp_headers = {}
+        for header in passthrough:
+            value = upstream.headers.get(header)
+            if value is not None:
+                resp_headers[header] = value
+        resp_headers.setdefault("Accept-Ranges", "bytes")
+
+        def generate():
+            try:
+                while True:
+                    chunk = upstream.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                try:
+                    upstream.close()
+                except Exception:
+                    pass
+
+        return Response(generate(), status=status, headers=resp_headers)
 
 
 
