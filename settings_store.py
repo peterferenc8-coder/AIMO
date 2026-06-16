@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from config import APP_CONFIG_DIR, SETTINGS_FILE
+from config import APP_CONFIG_DIR, SETTINGS_FILE, STASH_URL, STASH_API_KEY, STASH_TAG
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "google_api_key": "",
@@ -20,12 +20,20 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "google_model": "gemma-4-31b-it",
     "groq_model": "openai/gpt-oss-120b",
     "tts_enabled": True,
+    "stash_url": STASH_URL,
+    "stash_api_key": STASH_API_KEY,
+    "stash_tag": STASH_TAG,
     "google_validation": {
         "ok": False,
         "message": "Not validated yet",
         "checked_at": None,
     },
     "groq_validation": {
+        "ok": False,
+        "message": "Not validated yet",
+        "checked_at": None,
+    },
+    "stash_validation": {
         "ok": False,
         "message": "Not validated yet",
         "checked_at": None,
@@ -54,8 +62,12 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
     settings["google_model"] = _as_clean_text(settings.get("google_model"))
     settings["groq_model"] = _as_clean_text(settings.get("groq_model"))
     settings["tts_enabled"] = bool(settings.get("tts_enabled", DEFAULT_SETTINGS["tts_enabled"]))
+    settings["stash_url"] = _as_clean_text(settings.get("stash_url")).rstrip("/")
+    settings["stash_api_key"] = _as_clean_text(settings.get("stash_api_key"))
+    settings["stash_tag"] = _as_clean_text(settings.get("stash_tag"))
     settings["google_validation"] = _normalized_validation(settings.get("google_validation"))
     settings["groq_validation"] = _normalized_validation(settings.get("groq_validation"))
+    settings["stash_validation"] = _normalized_validation(settings.get("stash_validation"))
     return settings
 
 
