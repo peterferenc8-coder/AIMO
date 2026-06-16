@@ -174,6 +174,86 @@ function enqueueTyping(el, text) {
   processTypingQueue();
 }
 
+// ── AI video clip (play_video intent) ──────────────────────────────────────
+let aiVideoFunscriptLoaded = false;
+
+async function stopAiVideo() {
+  const panel = document.getElementById('ai-video-panel');
+  const video = document.getElementById('ai-video');
+  if (video) {
+    try { video.pause(); } catch (e) { /* ignore */ }
+    video.removeAttribute('src');
+    video.load();
+  }
+  if (panel) panel.style.display = 'none';
+  if (aiVideoFunscriptLoaded) {
+    aiVideoFunscriptLoaded = false;
+    try { await fetch('/api/funscript/stop', { method: 'POST' }); } catch (e) { /* ignore */ }
+  }
+}
+
+async function playAiVideo(info) {
+  if (!info || !info.video_url) return;
+  const panel = document.getElementById('ai-video-panel');
+  const video = document.getElementById('ai-video');
+  const title = document.getElementById('ai-video-title');
+  if (!panel || !video) return;
+
+  // Tear down any previous clip first.
+  await stopAiVideo();
+
+  if (title) title.textContent = info.title || 'Video clip';
+  panel.style.display = 'block';
+
+  // Pre-load the funscript (server-side) so it's ready when the video starts.
+  aiVideoFunscriptLoaded = false;
+  if (info.has_funscript && info.scene_id) {
+    try {
+      const res = await fetch(`/api/stash/funscript/${info.scene_id}`, { method: 'POST' });
+      const data = await res.json();
+      aiVideoFunscriptLoaded = Boolean(data.ok);
+    } catch (e) {
+      console.warn('Funscript load failed:', e);
+    }
+  }
+
+  // Drive the funscript player from the video element's own clock.
+  const syncStart = () => {
+    if (!aiVideoFunscriptLoaded) return;
+    fetch('/api/funscript/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ offset_ms: Math.floor(video.currentTime * 1000) }),
+    }).catch(() => {});
+  };
+  const syncPause = () => {
+    if (aiVideoFunscriptLoaded) fetch('/api/funscript/pause', { method: 'POST' }).catch(() => {});
+  };
+  const syncSeek = () => {
+    if (aiVideoFunscriptLoaded) {
+      fetch('/api/funscript/seek', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position_ms: Math.floor(video.currentTime * 1000) }),
+      }).catch(() => {});
+    }
+  };
+
+  video.onplay = syncStart;
+  video.onpause = syncPause;
+  video.onseeked = syncSeek;
+  video.onended = () => { stopAiVideo(); };
+
+  video.src = info.video_url;
+  video.currentTime = 0;
+  try {
+    await video.play();
+  } catch (e) {
+    // Autoplay may be blocked; the user can press play (controls are shown).
+    console.warn('Video autoplay blocked:', e);
+  }
+}
+
 // ── Stream cards ───────────────────────────────────────────────────────────
 function makeAICard(item) {
   const card = document.createElement('div');
@@ -219,7 +299,9 @@ function makeAICard(item) {
     speechEl.textContent = item.speech || '';
   }
 
-  if (item.source === 'big' && item.commands) {
+  if (item.video) {
+    playAiVideo(item.video);
+  } else if (item.source === 'big' && item.commands) {
     updateParamChips(item.commands);
   }
   return card;
@@ -292,6 +374,7 @@ function setAILoading(on) {
 
 function clearAIStream() {
   stopCurrentAudio();
+  stopAiVideo();
   document.getElementById('ai-list-stream').innerHTML = `
     <div class="empty-state">
       <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -357,6 +440,9 @@ document.getElementById('ai-start').addEventListener('click', async () => {
   }
 });
 
+const aiVideoCloseBtn = document.getElementById('ai-video-close');
+if (aiVideoCloseBtn) aiVideoCloseBtn.addEventListener('click', () => { stopAiVideo(); });
+
 document.getElementById('ai-pause').addEventListener('click', async () => {
   try {
     const res = await fetch('/api/pause', { method: 'POST' });
@@ -365,6 +451,8 @@ document.getElementById('ai-pause').addEventListener('click', async () => {
     isRunning = data.state === 'running';
     stopTimer();
     stopCurrentAudio(); // Pause audio too
+    const aiVideoEl = document.getElementById('ai-video');
+    if (aiVideoEl && !aiVideoEl.paused) aiVideoEl.pause(); // also pause any clip
 
     // Send device stop command - don't block on this
     try {

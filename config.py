@@ -108,6 +108,14 @@ AI_TO_DEVICE_PATTERN_MAP = {
     "insist": 6,
 }
 
+# ── Stash media server ─────────────────────────────────────────────────────
+# Stash exposes a GraphQL API and serves scene streams + funscripts directly.
+# These act as defaults; the live values are stored in the settings file and
+# editable from the Settings tab.
+STASH_URL     = os.getenv("STASH_URL", "")          # e.g. http://192.168.1.50:9999
+STASH_API_KEY = os.getenv("STASH_API_KEY", "")      # Stash API key (Settings > Security)
+STASH_TAG     = os.getenv("STASH_TAG", "playable")  # only scenes with this tag are playable
+
 # ── Coyote BLE ───────────────────────────────────────────────────────────────
 COYOTE_BLE_NAME = os.getenv("COYOTE_BLE_NAME", "47L121000")
 COYOTE_SOFT_LIMIT_A = int(os.getenv("COYOTE_SOFT_LIMIT_A", "100"))
