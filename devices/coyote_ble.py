@@ -19,7 +19,26 @@ except ImportError:
 
 from .base import AbstractDevice
 
+try:
+    from settings_store import load_settings
+except Exception:  # pragma: no cover - settings are optional for the device layer
+    load_settings = None  # type: ignore
+
 log = logging.getLogger(__name__)
+
+
+def _coyote_settings() -> dict:
+    if load_settings is None:
+        return {}
+    try:
+        return load_settings()
+    except Exception:
+        return {}
+
+
+def _configured_device_name() -> str:
+    name = str(_coyote_settings().get("coyote_ble_name", "") or "").strip()
+    return name or DEVICE_NAME
 
 # DG-Lab Coyote 3.0 BLE UUIDs (base UUID pattern)
 SERVICE_UUID = "0000180c-0000-1000-8000-00805f9b34fb"
@@ -44,14 +63,19 @@ class CoyoteBLE(AbstractDevice):
 
         # Desired output state (protected by _lock)
         self._lock = threading.Lock()
+        _cfg = _coyote_settings()
+        _freq = int(_cfg.get("coyote_freq_ms", 100) or 100)
+        _limit_a = int(_cfg.get("coyote_soft_limit_a", 100) or 100)
+        _limit_b = int(_cfg.get("coyote_soft_limit_b", 100) or 100)
+
         self._ch_a_strength = 0
         self._ch_b_strength = 0
-        self._ch_a_freq_ms = 100      # 10-1000
-        self._ch_b_freq_ms = 100
+        self._ch_a_freq_ms = _freq      # 10-1000
+        self._ch_b_freq_ms = _freq
         self._ch_a_wave_strength = 50  # 0-100
         self._ch_b_wave_strength = 50
-        self._soft_limit_a = 100
-        self._soft_limit_b = 100
+        self._soft_limit_a = _limit_a
+        self._soft_limit_b = _limit_b
         self._freq_balance_a = 150
         self._freq_balance_b = 150
         self._str_balance_a = 150
@@ -391,10 +415,11 @@ class CoyoteBLE(AbstractDevice):
         if not BleakScanner:
             return []
         devices = await BleakScanner.discover(timeout=timeout)
+        configured_name = _configured_device_name()
         results = []
         for d in devices:
             name = d.name or ""
-            if DEVICE_NAME in name or "Coyote" in name or "DG-LAB" in name:
+            if configured_name in name or "Coyote" in name or "DG-LAB" in name:
                 results.append({
                     "address": d.address,
                     "name": name,

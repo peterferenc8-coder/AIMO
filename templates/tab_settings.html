@@ -1,101 +1,272 @@
 <div class="settings-layout">
   <div class="settings-main">
+
+    <!-- ── Google AI ─────────────────────────────────────────────────────── -->
     <div class="settings-card">
       <h3>Google AI</h3>
-      <p class="settings-note">Save a key to unlock model selection. The key is checked immediately after saving.</p>
+      <p class="settings-note">Save a key to unlock model selection, then press <strong>Test</strong> to confirm it works.</p>
 
       <div class="settings-field">
         <label for="settings-google-key">Google API Key</label>
-        <input type="password" id="settings-google-key" autocomplete="off" spellcheck="false" placeholder="Enter a new key to replace the saved one" />
+        <input type="password" id="settings-google-key" data-setting="google_api_key" data-secret="true"
+               autocomplete="off" spellcheck="false" placeholder="Enter a new key to replace the saved one" />
         <div class="settings-status" id="settings-google-status">Not loaded</div>
       </div>
 
       <div class="settings-field">
         <label for="settings-google-model">Google Model</label>
-        <select id="settings-google-model" disabled></select>
+        <select id="settings-google-model" data-setting="google_model" disabled></select>
         <div class="settings-status" id="settings-google-model-status">Locked until a working key is present</div>
       </div>
 
       <div class="settings-actions">
-        <button class="btn btn-primary" id="settings-update-google">Update API Key</button>
+        <button class="btn btn-secondary" id="settings-test-google" data-test="google">Test Connection</button>
       </div>
     </div>
 
+    <!-- ── Groq AI ───────────────────────────────────────────────────────── -->
     <div class="settings-card">
       <h3>Groq AI</h3>
-      <p class="settings-note">Save a Groq key to unlock Groq model selection. The key is checked immediately after saving.</p>
+      <p class="settings-note">Save a Groq key to unlock Groq model selection, then press <strong>Test</strong> to confirm it works.</p>
 
       <div class="settings-field">
         <label for="settings-groq-key">Groq API Key</label>
-        <input type="password" id="settings-groq-key" autocomplete="off" spellcheck="false" placeholder="Enter a new key to replace the saved one" />
+        <input type="password" id="settings-groq-key" data-setting="groq_api_key" data-secret="true"
+               autocomplete="off" spellcheck="false" placeholder="Enter a new key to replace the saved one" />
         <div class="settings-status" id="settings-groq-status">Not loaded</div>
       </div>
 
       <div class="settings-field">
         <label for="settings-groq-model">Groq Model</label>
-        <select id="settings-groq-model" disabled></select>
+        <select id="settings-groq-model" data-setting="groq_model" disabled></select>
         <div class="settings-status" id="settings-groq-model-status">Locked until a working key is present</div>
       </div>
 
       <div class="settings-actions">
-        <button class="btn btn-primary" id="settings-update-groq">Update API Key</button>
+        <button class="btn btn-secondary" id="settings-test-groq" data-test="groq">Test Connection</button>
       </div>
     </div>
 
+    <!-- ── Generation ────────────────────────────────────────────────────── -->
     <div class="settings-card">
-      <h3>Text-to-Speech</h3>
-      <p class="settings-note">Enable or disable TTS synthesis for AI responses.</p>
+      <h3>Generation</h3>
+      <p class="settings-note">Sampling and model behaviour for generated turns. Applies to both Google and Groq.</p>
+
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label for="settings-gen-temperature">Temperature</label>
+          <input type="number" id="settings-gen-temperature" data-setting="gen_temperature" data-type="number"
+                 min="0" max="2" step="0.05" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-gen-top-p">Top-p</label>
+          <input type="number" id="settings-gen-top-p" data-setting="gen_top_p" data-type="number"
+                 min="0" max="1" step="0.01" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-gen-top-k">Top-k</label>
+          <input type="number" id="settings-gen-top-k" data-setting="gen_top_k" data-type="number"
+                 min="0" max="1000" step="1" />
+        </div>
+      </div>
 
       <div class="settings-field">
-        <label for="settings-tts-enabled">Enable TTS</label>
-        <input type="checkbox" id="settings-tts-enabled" />
+        <label for="settings-small-model">Small / Filler Model</label>
+        <input type="text" id="settings-small-model" data-setting="small_model"
+               autocomplete="off" spellcheck="false" placeholder="gemma-3-12b-it" />
       </div>
 
-      <div class="settings-actions">
-        <button class="btn btn-primary" id="settings-update-tts">Save TTS Setting</button>
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label for="settings-google-timeout">Google Timeout (s)</label>
+          <input type="number" id="settings-google-timeout" data-setting="google_timeout" data-type="number"
+                 min="1" max="3600" step="1" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-groq-timeout">Groq Timeout (s)</label>
+          <input type="number" id="settings-groq-timeout" data-setting="groq_timeout" data-type="number"
+                 min="1" max="3600" step="1" />
+        </div>
+      </div>
+
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label for="settings-big-retries">Big-model Max Retries</label>
+          <input type="number" id="settings-big-retries" data-setting="big_model_max_retries" data-type="number"
+                 min="0" max="20" step="1" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-big-retry-delay">Retry Delay (s)</label>
+          <input type="number" id="settings-big-retry-delay" data-setting="big_model_retry_delay" data-type="number"
+                 min="0" max="600" step="1" />
+        </div>
       </div>
     </div>
 
+    <!-- ── Session & Pacing ──────────────────────────────────────────────── -->
+    <div class="settings-card">
+      <h3>Session &amp; Pacing</h3>
+      <p class="settings-note">Buffering and timing of the producer/consumer loop that drives displayed turns.</p>
+
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label for="settings-default-turns">Default Turns</label>
+          <input type="number" id="settings-default-turns" data-setting="default_turns" data-type="number"
+                 min="1" max="1000" step="1" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-display-interval">Display Interval (s)</label>
+          <input type="number" id="settings-display-interval" data-setting="display_interval" data-type="number"
+                 min="0.5" max="600" step="0.5" />
+        </div>
+      </div>
+
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label for="settings-low-watermark">Low Watermark</label>
+          <input type="number" id="settings-low-watermark" data-setting="low_watermark" data-type="number"
+                 min="0" max="1000" step="1" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-high-watermark">High Watermark</label>
+          <input type="number" id="settings-high-watermark" data-setting="high_watermark" data-type="number"
+                 min="1" max="1000" step="1" />
+        </div>
+      </div>
+
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label for="settings-generator-sleep">Generator Sleep (s)</label>
+          <input type="number" id="settings-generator-sleep" data-setting="generator_sleep" data-type="number"
+                 min="0.1" max="60" step="0.1" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-banned-window">Banned-phrase Window</label>
+          <input type="number" id="settings-banned-window" data-setting="banned_phrase_window" data-type="number"
+                 min="0" max="200" step="1" />
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Text-to-Speech ────────────────────────────────────────────────── -->
+    <div class="settings-card">
+      <h3>Text-to-Speech</h3>
+
+      <div class="settings-field settings-toggle">
+        <input type="checkbox" id="settings-tts-enabled" data-setting="tts_enabled" data-type="checkbox" />
+        <label for="settings-tts-enabled">Enable TTS synthesis for AI responses</label>
+      </div>
+
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label for="settings-kokoro-voice">Voice</label>
+          <input type="text" id="settings-kokoro-voice" data-setting="kokoro_voice"
+                 autocomplete="off" spellcheck="false" placeholder="af_heart" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-kokoro-speed">Speed</label>
+          <input type="number" id="settings-kokoro-speed" data-setting="kokoro_speed" data-type="number"
+                 min="0.1" max="4" step="0.05" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-kokoro-device">Device</label>
+          <select id="settings-kokoro-device" data-setting="kokoro_device">
+            <option value="auto">auto</option>
+            <option value="cpu">cpu</option>
+            <option value="cuda">cuda</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Stash Server ──────────────────────────────────────────────────── -->
     <div class="settings-card">
       <h3>Stash Server</h3>
-      <p class="settings-note">Connect a Stash media server. The AI can cut to a random video clip tagged with the tag below; if the clip is interactive its funscript drives the device. Settings are checked immediately after saving.</p>
+      <p class="settings-note">Connect a Stash media server. The AI can cut to a random clip tagged below; if the clip is interactive its funscript drives the device.</p>
+
+      <div class="settings-field settings-toggle">
+        <input type="checkbox" id="settings-stash-video-enabled" data-setting="stash_video_enabled" data-type="checkbox" />
+        <label for="settings-stash-video-enabled">Enable video playback</label>
+      </div>
+
+      <div class="settings-field">
+        <label for="settings-video-chance">Video Interlude Chance (0–1)</label>
+        <input type="number" id="settings-video-chance" data-setting="video_chance" data-type="number"
+               min="0" max="1" step="0.01" />
+      </div>
 
       <div class="settings-field">
         <label for="settings-stash-url">Stash URL</label>
-        <input type="text" id="settings-stash-url" autocomplete="off" spellcheck="false" placeholder="http://192.168.1.50:9999" />
+        <input type="text" id="settings-stash-url" data-setting="stash_url"
+               autocomplete="off" spellcheck="false" placeholder="http://192.168.1.50:9999" />
       </div>
 
       <div class="settings-field">
         <label for="settings-stash-key">Stash API Key</label>
-        <input type="password" id="settings-stash-key" autocomplete="off" spellcheck="false" placeholder="Enter a new key to replace the saved one" />
+        <input type="password" id="settings-stash-key" data-setting="stash_api_key" data-secret="true"
+               autocomplete="off" spellcheck="false" placeholder="Enter a new key to replace the saved one" />
         <div class="settings-status" id="settings-stash-status">Not loaded</div>
       </div>
 
       <div class="settings-field">
         <label for="settings-stash-tag">Playable Tag</label>
-        <input type="text" id="settings-stash-tag" autocomplete="off" spellcheck="false" placeholder="playable" />
+        <input type="text" id="settings-stash-tag" data-setting="stash_tag"
+               autocomplete="off" spellcheck="false" placeholder="playable" />
       </div>
 
-      <div class="settings-field">
-        <label for="settings-stash-video-enabled">Enable Video Playback</label>
-        <input type="checkbox" id="settings-stash-video-enabled" />
-      </div>
-
-      <div class="settings-field">
-        <label for="settings-stash-proxy-enabled">Use SOCKS5 Proxy</label>
-        <input type="checkbox" id="settings-stash-proxy-enabled" />
+      <div class="settings-field settings-toggle">
+        <input type="checkbox" id="settings-stash-proxy-enabled" data-setting="stash_proxy_enabled" data-type="checkbox" />
+        <label for="settings-stash-proxy-enabled">Use SOCKS5 proxy</label>
       </div>
 
       <div class="settings-field">
         <label for="settings-stash-proxy-address">SOCKS5 Proxy Address</label>
-        <input type="text" id="settings-stash-proxy-address" autocomplete="off" spellcheck="false" placeholder="127.0.0.1:2080" />
+        <input type="text" id="settings-stash-proxy-address" data-setting="stash_proxy_address"
+               autocomplete="off" spellcheck="false" placeholder="127.0.0.1:2080" />
       </div>
 
       <div class="settings-actions">
-        <button class="btn btn-primary" id="settings-update-stash">Save & Test Connection</button>
+        <button class="btn btn-secondary" id="settings-test-stash" data-test="stash">Test Connection</button>
       </div>
     </div>
 
+    <!-- ── Device ────────────────────────────────────────────────────────── -->
+    <div class="settings-card">
+      <h3>Device</h3>
+      <p class="settings-note">Connection defaults and Coyote e-stim safety limits. Coyote limits apply live to a connected device.</p>
+
+      <div class="settings-field">
+        <label for="settings-device-ws-url">Default Device WebSocket URL</label>
+        <input type="text" id="settings-device-ws-url" data-setting="device_ws_url"
+               autocomplete="off" spellcheck="false" placeholder="ws://localhost:8888" />
+      </div>
+
+      <div class="settings-field">
+        <label for="settings-coyote-ble-name">Coyote BLE Name</label>
+        <input type="text" id="settings-coyote-ble-name" data-setting="coyote_ble_name"
+               autocomplete="off" spellcheck="false" placeholder="47L121000" />
+      </div>
+
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label for="settings-coyote-limit-a">Soft Limit A (0–200)</label>
+          <input type="number" id="settings-coyote-limit-a" data-setting="coyote_soft_limit_a" data-type="number"
+                 min="0" max="200" step="1" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-coyote-limit-b">Soft Limit B (0–200)</label>
+          <input type="number" id="settings-coyote-limit-b" data-setting="coyote_soft_limit_b" data-type="number"
+                 min="0" max="200" step="1" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-coyote-freq">Frequency (ms)</label>
+          <input type="number" id="settings-coyote-freq" data-setting="coyote_freq_ms" data-type="number"
+                 min="10" max="1000" step="1" />
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Prompt Files ──────────────────────────────────────────────────── -->
     <div class="settings-card">
       <h3>Prompt Files</h3>
       <p class="settings-note">Files are resolved from <code>prompts/current</code> first and fall back to <code>prompts/base</code>. Upload names must match an existing base file.</p>
@@ -114,6 +285,13 @@
       </div>
 
       <div class="settings-status" id="settings-prompt-status">No prompt selected yet</div>
+    </div>
+
+    <!-- ── Global save bar ───────────────────────────────────────────────── -->
+    <div class="settings-savebar" id="settings-savebar">
+      <span class="settings-dirty" id="settings-dirty">All changes saved</span>
+      <span class="settings-status" id="settings-global-status"></span>
+      <button class="btn btn-primary" id="settings-save-all">Save All</button>
     </div>
   </div>
 

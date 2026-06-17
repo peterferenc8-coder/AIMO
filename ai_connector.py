@@ -35,10 +35,12 @@ class BaseAIConnector:
     Shared machinery for API health tracking, validation, and response logging.
     """
 
-    def __init__(self, *, api_key: str, model: str, timeout: int, log_dir_name: str):
+    def __init__(self, *, api_key: str, model: str, timeout: int, log_dir_name: str,
+                 gen_options: dict | None = None):
         self.api_key = ""
         self.model = model
         self.timeout = timeout
+        self.gen_options = dict(gen_options) if gen_options else dict(GENERATION_OPTIONS)
         self.response_log_dir = (
             Path(__file__).resolve().parent / "logs" / log_dir_name
         )
@@ -58,6 +60,7 @@ class BaseAIConnector:
         api_key: str | None = None,
         model: str | None = None,
         timeout: int | None = None,
+        gen_options: dict | None = None,
     ) -> None:
         """Update connection settings in place without replacing callers."""
         if api_key is not None:
@@ -66,6 +69,8 @@ class BaseAIConnector:
             self.model = model
         if timeout is not None:
             self.timeout = timeout
+        if gen_options is not None:
+            self.gen_options = dict(gen_options)
 
     def health_check(self) -> dict[str, Any]:
         configured = self._is_configured()
@@ -200,6 +205,7 @@ class GoogleAIConnector(BaseAIConnector):
         api_key: str = "",
         model: str = GOOGLE_MODEL,
         timeout: int = GOOGLE_TIMEOUT,
+        gen_options: dict | None = None,
     ):
         self.client = None
         self._chat_session = None
@@ -208,6 +214,7 @@ class GoogleAIConnector(BaseAIConnector):
             model=model,
             timeout=timeout,
             log_dir_name="google_api_responses",
+            gen_options=gen_options,
         )
 
     def reconfigure(
@@ -215,8 +222,9 @@ class GoogleAIConnector(BaseAIConnector):
         api_key: str | None = None,
         model: str | None = None,
         timeout: int | None = None,
+        gen_options: dict | None = None,
     ) -> None:
-        super().reconfigure(api_key=api_key, model=model, timeout=timeout)
+        super().reconfigure(api_key=api_key, model=model, timeout=timeout, gen_options=gen_options)
         if api_key is not None:
             self.client = genai.Client(api_key=self.api_key) if self.api_key else None
 
@@ -238,9 +246,9 @@ class GoogleAIConnector(BaseAIConnector):
             raise RuntimeError("Google AI API key is not configured")
 
         generation_config = genai.types.GenerateContentConfig(
-            temperature=GENERATION_OPTIONS.get("temperature", 1.0),
-            top_p=GENERATION_OPTIONS.get("top_p", 0.95),
-            top_k=GENERATION_OPTIONS.get("top_k", 60),
+            temperature=self.gen_options.get("temperature", 1.0),
+            top_p=self.gen_options.get("top_p", 0.95),
+            top_k=self.gen_options.get("top_k", 60),
             system_instruction=system_prompt,  # Set once, persists for session
             thinking_config=genai.types.ThinkingConfig(
                 include_thoughts=False,
@@ -291,6 +299,7 @@ class GroqAIConnector(BaseAIConnector):
         api_key: str = "",
         model: str = GROQ_MODEL,
         timeout: int = GROQ_TIMEOUT,
+        gen_options: dict | None = None,
     ):
         self.base_url = "https://api.groq.com/openai/v1/chat/completions"
         self.models_url = "https://api.groq.com/openai/v1/models"
@@ -300,6 +309,7 @@ class GroqAIConnector(BaseAIConnector):
             model=model,
             timeout=timeout,
             log_dir_name="groq_api_responses",
+            gen_options=gen_options,
         )
 
     def _is_configured(self) -> bool:
@@ -322,8 +332,8 @@ class GroqAIConnector(BaseAIConnector):
         payload = {
             "model": model,
             "messages": self._messages,
-            "temperature": GENERATION_OPTIONS.get("temperature", 1.0),
-            "top_p": GENERATION_OPTIONS.get("top_p", 0.95),
+            "temperature": self.gen_options.get("temperature", 1.0),
+            "top_p": self.gen_options.get("top_p", 0.95),
         }
 
         response_data = self._call_api(payload)

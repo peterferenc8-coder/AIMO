@@ -36,7 +36,23 @@ from prompt_store import (
 )
 from prompt_builder import get_pacing_strategies, get_persona_moods
 from settings_store import load_settings, mask_secret, provider_presence, save_settings
+from stash_client import StashClient
 import tts
+
+# Non-secret scalar settings the Settings UI can read back and write.
+PLAIN_SETTING_KEYS = (
+    "google_model", "groq_model", "tts_enabled",
+    "stash_url", "stash_tag", "stash_video_enabled",
+    "stash_proxy_enabled", "stash_proxy_address", "video_chance",
+    "small_model", "gen_temperature", "gen_top_p", "gen_top_k",
+    "google_timeout", "groq_timeout", "big_model_max_retries", "big_model_retry_delay",
+    "default_turns", "banned_phrase_window", "display_interval",
+    "low_watermark", "high_watermark", "generator_sleep",
+    "kokoro_voice", "kokoro_speed", "kokoro_device",
+    "device_ws_url", "coyote_ble_name",
+    "coyote_soft_limit_a", "coyote_soft_limit_b", "coyote_freq_ms",
+)
+SECRET_SETTING_KEYS = ("google_api_key", "groq_api_key", "stash_api_key")
 
 from config import PATTERNS_DIR
 
@@ -204,6 +220,42 @@ def _keep_existing(value: str | None, fallback: str) -> str:
     return text if text else fallback
 
 
+def _changed(body: dict, current: dict, *keys: str) -> bool:
+    """True if any of *keys* in the request body differs from the saved value.
+    A blank secret is treated as 'unchanged' (keeps the existing secret)."""
+    for key in keys:
+        if key not in body:
+            continue
+        new_value = body[key]
+        if key in SECRET_SETTING_KEYS:
+            if not str(new_value or "").strip():
+                continue
+            if str(new_value).strip() != str(current.get(key, "")):
+                return True
+        elif new_value != current.get(key):
+            return True
+    return False
+
+
+def _push_coyote_settings(settings: dict) -> None:
+    """Live-apply Coyote safety limits/frequency to a connected Coyote device."""
+    dev = get_active_device()
+    if not dev or getattr(dev, "device_type", "") != "coyote":
+        return
+    try:
+        if not dev.get_state().connected:
+            return
+        freq = int(settings.get("coyote_freq_ms", 100))
+        dev.send_command({
+            "soft_limit_a": int(settings.get("coyote_soft_limit_a", 100)),
+            "soft_limit_b": int(settings.get("coyote_soft_limit_b", 100)),
+            "freq_a": freq,
+            "freq_b": freq,
+        })
+    except Exception as exc:
+        log.warning("Failed to push Coyote settings to device: %s", exc)
+
+
 def _validation_from_settings(settings: dict, key: str) -> dict:
     value = settings.get(key)
     if isinstance(value, dict):
@@ -215,22 +267,22 @@ def _validation_from_settings(settings: dict, key: str) -> dict:
     }
 
 
+def _plain_settings_payload(settings: dict) -> dict:
+    """Every non-secret scalar setting, for populating the Settings form."""
+    return {key: settings.get(key) for key in PLAIN_SETTING_KEYS}
+
+
 def _saved_settings_payload(settings: dict) -> dict:
-    return {
+    payload = _plain_settings_payload(settings)
+    payload.update({
         "google_api_key_masked": mask_secret(settings.get("google_api_key", "")),
         "groq_api_key_masked": mask_secret(settings.get("groq_api_key", "")),
         "google_key_present": bool(settings.get("google_api_key", "")),
         "groq_key_present": bool(settings.get("groq_api_key", "")),
-        "google_model": settings.get("google_model", ""),
-        "groq_model": settings.get("groq_model", ""),
-        "stash_url": settings.get("stash_url", ""),
         "stash_api_key_masked": mask_secret(settings.get("stash_api_key", "")),
         "stash_key_present": bool(str(settings.get("stash_api_key", "") or "").strip()),
-        "stash_tag": settings.get("stash_tag", ""),
-        "stash_video_enabled": bool(settings.get("stash_video_enabled", True)),
-        "stash_proxy_enabled": bool(settings.get("stash_proxy_enabled", False)),
-        "stash_proxy_address": settings.get("stash_proxy_address", ""),
-    }
+    })
+    return payload
 
 
 def _available_ai_models(settings: dict) -> list[str]:
@@ -308,81 +360,106 @@ def register_routes(app: Flask) -> None:
         google_validation = _validation_from_settings(settings, "google_validation")
         groq_validation = _validation_from_settings(settings, "groq_validation")
 
-        return jsonify(
-            {
-                "ok": True,
-                "google_api_key_masked": mask_secret(settings.get("google_api_key", "")),
-                "groq_api_key_masked": mask_secret(settings.get("groq_api_key", "")),
-                "google_key_present": presence["google"],
-                "groq_key_present": presence["groq"],
-                "google_model": settings.get("google_model", ""),
-                "groq_model": settings.get("groq_model", ""),
-                "google_model_options": MODEL_OPTIONS,
-                "groq_model_options": GROQ_MODEL_OPTIONS,
-                "google_validation": google_validation,
-                "groq_validation": groq_validation,
-                "tts_enabled": settings.get("tts_enabled", True),
-                "stash_url": settings.get("stash_url", ""),
-                "stash_api_key_masked": mask_secret(settings.get("stash_api_key", "")),
-                "stash_key_present": bool(str(settings.get("stash_api_key", "") or "").strip()),
-                "stash_tag": settings.get("stash_tag", ""),
-                "stash_video_enabled": bool(settings.get("stash_video_enabled", True)),
-                "stash_proxy_enabled": bool(settings.get("stash_proxy_enabled", False)),
-                "stash_proxy_address": settings.get("stash_proxy_address", ""),
-                "stash_validation": _validation_from_settings(settings, "stash_validation"),
-                "prompt_names": list_base_prompt_names(),
-            }
-        )
+        payload = {
+            "ok": True,
+            "google_api_key_masked": mask_secret(settings.get("google_api_key", "")),
+            "groq_api_key_masked": mask_secret(settings.get("groq_api_key", "")),
+            "google_key_present": presence["google"],
+            "groq_key_present": presence["groq"],
+            "stash_api_key_masked": mask_secret(settings.get("stash_api_key", "")),
+            "stash_key_present": bool(str(settings.get("stash_api_key", "") or "").strip()),
+            "google_model_options": MODEL_OPTIONS,
+            "groq_model_options": GROQ_MODEL_OPTIONS,
+            "google_validation": google_validation,
+            "groq_validation": groq_validation,
+            "stash_validation": _validation_from_settings(settings, "stash_validation"),
+            "prompt_names": list_base_prompt_names(),
+        }
+        payload.update(_plain_settings_payload(settings))
+        return jsonify(payload)
 
     @app.post("/api/settings")
     def api_settings_save():
+        """
+        Persist every settings field at once (global save). Validation is NOT
+        re-run here — the per-service Test endpoints own connectivity checks, so
+        a save stays fast and never blocks on a network round-trip. A changed
+        secret resets that service's stored validation to "pending" so the
+        status panel doesn't show a stale "Valid" against a new key.
+        """
         body = request.get_json(silent=True) or {}
         current = load_settings()
+        next_settings = dict(current)
 
-        next_settings = {
-            "google_api_key": _keep_existing(body.get("google_api_key"), current.get("google_api_key", "")),
-            "groq_api_key": _keep_existing(body.get("groq_api_key"), current.get("groq_api_key", "")),
-            "google_model": _keep_existing(body.get("google_model"), current.get("google_model", "")),
-            "groq_model": _keep_existing(body.get("groq_model"), current.get("groq_model", "")),
-            "tts_enabled": body.get("tts_enabled", current.get("tts_enabled", True)),
-            "stash_url": (str(body["stash_url"]).strip() if "stash_url" in body
-                          else current.get("stash_url", "")).rstrip("/"),
-            "stash_api_key": _keep_existing(body.get("stash_api_key"), current.get("stash_api_key", "")),
-            "stash_tag": (str(body["stash_tag"]).strip() if "stash_tag" in body
-                          else current.get("stash_tag", "")),
-            "stash_video_enabled": (bool(body["stash_video_enabled"]) if "stash_video_enabled" in body
-                                    else current.get("stash_video_enabled", True)),
-            "stash_proxy_enabled": (bool(body["stash_proxy_enabled"]) if "stash_proxy_enabled" in body
-                                    else current.get("stash_proxy_enabled", False)),
-            "stash_proxy_address": (str(body["stash_proxy_address"]).strip() if "stash_proxy_address" in body
-                                    else current.get("stash_proxy_address", "")),
-        }
+        for key in SECRET_SETTING_KEYS:
+            next_settings[key] = _keep_existing(body.get(key), current.get(key, ""))
 
-        google_validation = _validate_google_key(next_settings["google_api_key"], next_settings["google_model"])
-        groq_validation = _validate_groq_key(next_settings["groq_api_key"], next_settings["groq_model"])
+        for key in PLAIN_SETTING_KEYS:
+            if key in body:
+                next_settings[key] = body[key]
 
-        next_settings["google_validation"] = google_validation
-        next_settings["groq_validation"] = groq_validation
+        # Invalidate stored validation when the relevant credentials changed.
+        pending = {"ok": False, "message": "Saved — press Test to validate", "checked_at": None}
+        if _changed(body, current, "google_api_key", "google_model"):
+            next_settings["google_validation"] = pending
+        if _changed(body, current, "groq_api_key", "groq_model"):
+            next_settings["groq_validation"] = pending
+        if _changed(body, current, "stash_api_key", "stash_url", "stash_tag",
+                    "stash_proxy_enabled", "stash_proxy_address"):
+            next_settings["stash_validation"] = pending
 
         save_settings(next_settings)
-        _orchestrator.apply_settings(next_settings)
+        saved = load_settings()
+        _orchestrator.apply_settings(saved)
 
-        # Validate Stash against the freshly-applied client (network round-trip).
-        stash_validation = _orchestrator.stash.validate()
-        next_settings["stash_validation"] = stash_validation
-        save_settings(next_settings)
+        # Live-push Coyote safety limits/frequency to a connected Coyote device.
+        _push_coyote_settings(saved)
 
         return jsonify(
             {
                 "ok": True,
-                "saved": _saved_settings_payload(next_settings),
-                "google_validation": google_validation,
-                "groq_validation": groq_validation,
-                "stash_validation": stash_validation,
-                "tts_enabled": next_settings["tts_enabled"],
+                "saved": _saved_settings_payload(saved),
+                "google_validation": saved.get("google_validation"),
+                "groq_validation": saved.get("groq_validation"),
+                "stash_validation": saved.get("stash_validation"),
+                "tts_enabled": saved.get("tts_enabled", True),
                 "prompt_names": list_base_prompt_names(),
             }
         )
+
+    # ── Per-service connectivity tests (no persistence) ─────────────────────
+
+    @app.post("/api/settings/test/<provider>")
+    def api_settings_test(provider: str):
+        """Validate a single service using the saved credentials and persist
+        the resulting validation state. Triggered by each service's Test button."""
+        saved = load_settings()
+
+        if provider == "google":
+            validation = _validate_google_key(
+                saved.get("google_api_key", ""), saved.get("google_model", "")
+            )
+            saved["google_validation"] = validation
+        elif provider == "groq":
+            validation = _validate_groq_key(
+                saved.get("groq_api_key", ""), saved.get("groq_model", "")
+            )
+            saved["groq_validation"] = validation
+        elif provider == "stash":
+            client = StashClient(
+                url=saved.get("stash_url", ""),
+                api_key=saved.get("stash_api_key", ""),
+                tag=saved.get("stash_tag", ""),
+                proxy_enabled=saved.get("stash_proxy_enabled", False),
+                proxy_address=saved.get("stash_proxy_address", ""),
+            )
+            validation = client.validate()
+            saved["stash_validation"] = validation
+        else:
+            return jsonify({"ok": False, "error": f"Unknown service '{provider}'"}), 400
+
+        save_settings(saved)
+        return jsonify({"ok": True, "provider": provider, "validation": validation})
 
     @app.get("/api/prompts/<path:prompt_name>")
     def api_prompt_download(prompt_name: str):
@@ -500,7 +577,8 @@ def register_routes(app: Flask) -> None:
     @app.post("/api/device/connect")
     def api_device_connect():
         body = request.get_json(silent=True) or {}
-        url = body.get("url", "ws://localhost:8888")
+        default_url = load_settings().get("device_ws_url", "ws://localhost:8888")
+        url = body.get("url") or default_url
         dev = get_active_device()
         if not dev:
             return jsonify({"ok": False, "error": "No device selected"}), 400

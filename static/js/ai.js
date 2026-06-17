@@ -409,7 +409,6 @@ function setSelectToValue(selectEl, value) {
 
 // ── Event listeners ────────────────────────────────────────────────────────
 document.getElementById('ai-start').addEventListener('click', async () => {
-  const nTurns = parseInt(document.getElementById('ai-n-turns').value) || 20;
   const modelSelect = document.getElementById('ai-model');
   const selectedModel = modelSelect ? modelSelect.value : '';
 
@@ -426,7 +425,6 @@ document.getElementById('ai-start').addEventListener('click', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        n_turns: nTurns,
         persona: document.getElementById('ai-persona').value === 'random' ? null : document.getElementById('ai-persona').value,
         pacing: document.getElementById('ai-pacing').value === 'random' ? null : document.getElementById('ai-pacing').value,
         model: selectedModel,

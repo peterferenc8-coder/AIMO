@@ -1,106 +1,427 @@
-# OSSM Controller
+# AIMO — AI Session Orchestrator ("Aimee")
 
-A Flask web application that generates varied AI-driven session scripts for the OSSM device using Google and Groq Generative AI models.
+AIMO is a Flask web application that drives interactive hardware (an **OSSM** linear
+actuator or a **DG-Lab Coyote 3.0** e-stim unit) from an AI persona. A large language
+model (Google Gemini/Gemma or Groq-hosted models) generates a running stream of
+*turns* — each turn is a line of speech plus a narrative **intent** and an
+**intensity**. The orchestrator translates those intents into concrete device motion,
+optionally speaks the text with local **Kokoro TTS**, and can cut to interactive video
+clips streamed from a **Stash** media server (whose funscripts drive the device).
 
-## Prerequisites
+The browser UI is a tabbed control panel; all state lives in memory for the lifetime
+of the Flask process.
 
-- Python 3.10+
-- A Google API key (for Gemini/Gemma models) or a Groq API key (for Llama, Qwen, etc.)
+---
 
-## Setup
+## Table of contents
+
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Architecture](#architecture)
+  - [The two-loop orchestrator](#the-two-loop-orchestrator)
+  - [Lifecycle of a turn](#lifecycle-of-a-turn)
+  - [The AI consumer / connectors](#the-ai-consumer--connectors)
+  - [Prompt system](#prompt-system)
+  - [Intents and pattern translation](#intents-and-pattern-translation)
+  - [Devices](#devices)
+  - [Stash integration](#stash-integration)
+  - [Funscript player](#funscript-player)
+  - [Text-to-speech](#text-to-speech)
+- [Settings](#settings)
+- [Prompt storage](#prompt-storage)
+- [Authoring intents and patterns](#authoring-intents-and-patterns)
+- [HTTP API](#http-api)
+- [Project structure](#project-structure)
+- [Configuration reference](#configuration-reference)
+- [Dependencies](#dependencies)
+
+---
+
+## Features
+
+- **AI-generated sessions** — a persona produces speech + intent + intensity per turn, paced and de-duplicated to avoid repetition.
+- **Two AI back ends** — Google Generative AI (Gemini/Gemma) and Groq's OpenAI-compatible API, switchable per session; a smaller "filler" model is configurable separately.
+- **Intent → motion compiler** — narrative intents (`tease`, `build`, `reward`, `settle`, `stop`) plus a 0.0–1.0 intensity are compiled to concrete device commands via per-intent JSON "bands" with weighted random variations.
+- **Multiple devices** — OSSM (WebSocket or serial) and Coyote 3.0 (BLE), behind a common device abstraction with a live state stream.
+- **Stash media server** — pull random tagged scenes, proxy their video through Flask (keeping the API key server-side), and drive the device from each scene's funscript. Optional SOCKS5 tunnelling.
+- **Funscript playback** — upload/load `.funscript` files or play scene funscripts, with seek/pause/resume and latency/invert tuning.
+- **Local TTS** — Kokoro synthesizes speech with word-level timing so the UI highlights each word as it is spoken.
+- **Fully settable runtime config** — generation params, pacing/buffering, timeouts, TTS voice, device limits, and more, all editable from the Settings tab with a global save and per-service connectivity tests.
+- **Built-in emulators** — a standalone OSSM firmware emulator and a one-click serial (PTY) emulator for development without hardware.
+
+---
+
+## Quick start
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-Open http://localhost:5000 in your browser.
+Open <http://localhost:5000>.
+
+`requirements.txt` covers the core (Flask, `google-genai`, `websockets`, `pyserial`).
+Several features are **optional** and lazy-loaded — install them only if you need them
+(see [Dependencies](#dependencies)).
+
+To set up an AI back end, open the **Settings** tab, paste a Google and/or Groq API key,
+**Save All**, then press **Test Connection**. Once a key validates, its models unlock for
+selection on the **AI Session** tab.
+
+---
+
+## Architecture
+
+```
+                                  ┌──────────────────────────────────────────┐
+   Browser (tabbed UI)            │            SessionOrchestrator             │
+   ┌──────────────┐   HTTP/SSE    │                                            │
+   │ setup/manual │ ─────────────▶│   generator loop ──┐      ┌── display loop │
+   │ ai/funscript │               │   (producer)       │      │  (consumer)    │
+   │ settings     │ ◀──── poll ───│        │            ▼      ▼                │
+   └──────────────┘               │        │      ┌───────────────┐            │
+                                  │        │      │ pending buffer│            │
+        routes.py  ──────────────▶│        ▼      └───────────────┘            │
+                                  │   AI connector       │                     │
+                                  │   (Google / Groq)    │ every DISPLAY_      │
+                                  │        │             │ INTERVAL seconds    │
+                                  │        ▼             ▼                     │
+                                  │   ResponseParser → IntentCompiler          │
+                                  │        │             │                     │
+                                  │        ▼             ▼                     │
+                                  │   Brain/Session   DeviceState → device     │
+                                  │   PromptBuilder      │      TTS synth       │
+                                  └──────────────────────┼─────────────────────┘
+                                                         ▼
+                              OSSM (WS/serial) · Coyote (BLE) · Stash video/funscript
+```
+
+Key modules:
+
+| Module | Role |
+|--------|------|
+| `main.py` / `app_factory.py` | Entry point and Flask app factory (logging, route registration, default device). |
+| `routes.py` | Every HTTP endpoint; owns the single `SessionOrchestrator` instance and the `FunscriptPlayer`. |
+| `orchestrator.py` | The heart: producer/consumer loops, session lifecycle, settings application. |
+| `ai_connector.py` | Stateful wrappers around Google and Groq chat APIs. |
+| `brain.py` / `prompt_builder.py` | Compose the system prompt, seed prompt, and per-turn prompts. |
+| `response_parser.py` | Extract structured turns (speech/intent/intensity) from raw model text. |
+| `intent_compiler.py` | Map `(intent, intensity)` → concrete device command. |
+| `session_manager.py` | In-memory turn history + effective device state. |
+| `devices/` | Device abstraction (`base`), implementations (`ossm`, `coyote_ble`), and a `registry` singleton. |
+| `stash_client.py` | GraphQL + media accessor for a Stash server, with stdlib SOCKS5 support. |
+| `funscript_player.py` | Schedules funscript actions and streams positions to the device. |
+| `tts.py` | Kokoro TTS with word-level timing and an on-disk cache. |
+| `settings_store.py` | Load/normalize/save the local settings file (the single source of truth for runtime config). |
+
+### The two-loop orchestrator
+
+`SessionOrchestrator` runs a **producer/consumer** pattern with watermark backpressure:
+
+- **Generator loop (producer)** — when the pending buffer drops to or below `LOW_WATERMARK`, it asks the big model for a batch of `HIGH_WATERMARK` turns on a background thread, with adaptive backoff after failures.
+- **Display loop (consumer)** — pops one item from the buffer every `DISPLAY_INTERVAL` seconds, applies its device command, and records it as "displayed" for the UI to poll. A video turn instead holds the loop until the clip ends (or a safety timeout).
+
+The browser drives the UI by polling `GET /api/poll?since=<index>`, which returns any newly displayed items. Pause/resume/clear act on the shared state under a lock.
+
+### Lifecycle of a turn
+
+1. **Generate** — the big connector returns raw text (a JSON list of turn objects).
+2. **Parse** — `ResponseParser` strips markdown fences, tolerates NDJSON / partial JSON, and yields `Turn` objects with `speech`, `intent`, and `ai_intensity` (clamped to `[0,1]`).
+3. **Maybe inject video** — with probability `video_chance`, a normal turn is promoted to a `play_video` interlude (only when Stash is configured).
+4. **Compile** — for a motion turn, `IntentCompiler.compile(intent, intensity)` selects an intensity band and renders a `CompiledCommand` (pattern, speed, depth, base, duration), which becomes the turn's `Commands`.
+5. **Record** — the turn is appended to `Brain`/`SessionManager` history (used for the "do not repeat" window) and the running `DeviceState`.
+6. **Build display item** — speech is synthesized via TTS (if enabled), or a Stash clip is resolved for a video turn.
+7. **Display** — the consumer loop applies the command to the active device and exposes the item to the UI.
+
+### The AI consumer / connectors
+
+`ai_connector.py` defines a `BaseAIConnector` with two concrete subclasses:
+
+- **`GoogleAIConnector`** — uses `google-genai` chat sessions; the system prompt is set once via `start_session`, then each turn sends only a small user prompt.
+- **`GroqAIConnector`** — talks to Groq's OpenAI-compatible REST endpoint using only the stdlib, maintaining the message history internally and trimming it to a bounded window.
+
+Both are **stateful** (system prompt sent once per session), expose `validate_api_key()` / `health_check()`, and carry their own `gen_options` (temperature/top-p/top-k) and `timeout`, which the orchestrator pushes from settings via `reconfigure()`. Failed big-model calls are retried up to `big_model_max_retries` times with `big_model_retry_delay` between attempts (interruptible by a stop request).
+
+### Prompt system
+
+`Brain` is the "creative director"; `PromptBuilder` assembles the actual text:
+
+- **System prompt** — persona definition + the patterns block (`PatternLoader.to_prompt_block()`) + state info, sent once at session start.
+- **Seed prompt** — the first user message: a randomly chosen persona *mood*, *pacing strategy*, and opening pattern, drawn from the seed files.
+- **Per-turn prompt** — minimal fresh context: any user event, the current device state, and a **banned-phrase window** (the last `banned_phrase_window` speech lines, truncated) so the model avoids repeating itself.
+
+### Intents and pattern translation
+
+There are two related but distinct concepts:
+
+- **Patterns** (`patterns/*.json`) — motion primitives the device firmware understands (e.g. `simple_stroke`, `half_n_half`, `deeper`, `stop_n_go`). Each file documents its parameters; they're serialized into the system prompt so the model knows what exists.
+- **Intents** (`intents/<name>/*.json`) — *narrative* directives the AI emits (`tease`, `build`, `reward`, `settle`, plus the built-in `stop`). Each intent folder contains one JSON file per **intensity band** (e.g. `0.0-0.3.json`, `0.4-0.6.json`, `0.7-1.0.json`).
+
+Compilation (`IntentCompiler`):
+
+1. `stop` is built-in (halts the machine; no band file needed).
+2. Otherwise the band whose `intensity_range` contains the (jittered) intensity is selected.
+3. The band is *rendered*: its base parameters are taken, then one of its optional `variations` is chosen by weighted probability and merged on top.
+4. A repeat-avoidance check re-rolls once with extra jitter if the resulting fingerprint matches a recent one.
+
+The result is a `CompiledCommand` with a **pattern name**, `speed`, `depth`, `base`,
+optional `intensity`/`easing`, and `duration_ms`.
+
+When that command reaches the **OSSM** device (`OSSMDevice.apply_ai_commands`), motion
+parameters are set first, then the pattern name is mapped to a firmware **slot index**
+via `AI_TO_DEVICE_PATTERN_MAP` in `config.py`:
+
+```
+stop → -1   simple_stroke → 0   teasing_and_pounding → 1   robo_stroke → 2
+half_n_half → 3   deeper → 4   stop_n_go → 5   insist → 6
+```
+
+— and the device is told `setPattern`/`startPattern`. (This map is intentionally a
+fixed constant, since it's tied to firmware slots, not a user preference.)
+
+### Devices
+
+All devices implement `AbstractDevice` (`devices/base.py`): `connect`, `disconnect`,
+`send_command`, `emergency_stop`, plus a `DeviceState` and a listener mechanism used to
+stream live state to the browser over SSE. A `registry` keeps a single active device and
+swaps implementations on request.
+
+- **`OSSMDevice`** — connects over **WebSocket** (default `ws://localhost:8888`) or **serial** (auto-detected from a `/dev/…`, `COM…`, `tty…`, or `/tmp/…` address). It reconnects with exponential backoff and forwards raw position messages to listeners. A standalone `device_emulator.py` and a one-click serial-PTY emulator (`socat` + emulator) allow development without hardware.
+- **`CoyoteBLE`** — direct BLE control of a DG-Lab Coyote 3.0 via `bleak`, implementing the V3 protocol. Channel strengths are clamped to configurable **soft limits**, and BLE name / frequency / limits are taken from settings (and pushed live to a connected device when saved).
+
+### Stash integration
+
+`stash_client.py` is a dependency-free client for a [Stash](https://stashapp.cc) server:
+
+- **Discovery** — resolves the configured tag to an ID, then queries `findScenes` for every scene carrying that tag (`id`, `title`, `interactive`, duration). Interactive scenes are treated as having a funscript. Results are cached until the config changes.
+- **Selection** — `pick_random_scene(prefer_interactive=True)` chooses a clip, preferring interactive ones so the funscript can drive the device.
+- **Video proxying** — `GET /api/stash/video/<id>` streams the scene through Flask, forwarding `Range` headers so the browser can seek, and keeping the Stash **API key server-side** (never exposed to the page).
+- **Funscript** — `fetch_funscript()` pulls the scene's funscript JSON for the `FunscriptPlayer`.
+- **SOCKS5** — when enabled, all requests tunnel through a SOCKS5 proxy implemented with the stdlib `socket` module (no extra dependency).
+
+During a session, a `play_video` turn (chosen by the model, or injected at rate
+`video_chance`) resolves to a random scene; the UI plays the proxied video while its
+funscript drives the device, and `POST /api/video/ended` releases the display hold.
+
+### Funscript player
+
+`FunscriptPlayer` parses a funscript (single- or multi-axis), sorts its actions, and
+schedules each one with a `threading.Timer`, sending `stream` position commands to the
+active device. It supports `start`/`pause`/`resume`/`seek`/`stop`, reports live progress
+and the interpolated current position, and has runtime `latency_ms` and `invert` tuning.
+
+### Text-to-speech
+
+`tts.py` wraps [Kokoro](https://github.com/hexgrad/kokoro). `synthesize()` returns an
+audio URL plus **word-level timings** (start/end ms per word) so the UI can highlight
+each word as it plays, and caches results on disk keyed by text+voice+speed. Voice,
+speed, and device (`auto`/`cpu`/`cuda`) come from settings via `tts.configure()`; Kokoro
+and `soundfile` are imported lazily so the app starts even when TTS isn't installed.
+
+---
 
 ## Settings
 
-The app stores runtime API keys in a local settings file at `~/.config/aimee/settings.json`. The Settings tab lets you update the saved values without editing source files.
+Runtime configuration lives in `~/.config/aimee/settings.json`, managed by
+`settings_store.py`. `config.py` provides the defaults (each overridable by an
+environment variable); saved settings then override those, and values are
+**range-clamped and normalized** on save.
 
-The Settings tab includes:
+The **Settings tab** edits everything through one **global Save All** button with an
+unsaved-changes indicator. Service cards (Google, Groq, Stash) additionally have a
+**Test Connection** button that validates just that service and updates the status panel
+on the right — saving stays fast and never blocks on the network, while tests own
+connectivity checks. Changing a credential resets that service's stored validation to
+"pending".
 
-- Google and Groq API key management with immediate validation on save
-- Model selection per provider, unlocked when a valid key is present
-- Fixed-name prompt download/upload
-- Revert of all current prompt overrides back to base
+Settings categories: **Google AI**, **Groq AI**, **Generation** (temperature, top-p,
+top-k, filler model, timeouts, retries), **Session & Pacing** (turns, watermarks,
+display interval, generator sleep, banned-phrase window), **Text-to-Speech** (enable,
+voice, speed, device), **Stash** (enable + interlude chance, URL, key, tag, SOCKS5),
+**Device** (default WS URL, Coyote BLE name + soft limits + frequency), and **Prompt
+Files**.
 
-## Prompt Storage
+---
 
-Prompts are split into two layers under `prompts/`:
+## Prompt storage
 
-- `prompts/base/` holds the immutable source files
-- `prompts/current/` holds editable overrides
-Prompts are split into layers under `prompts/`:
+Prompts live under `prompts/` in two layers:
 
-- `prompts/base/` holds the immutable source files
-- `prompts/current/` holds editable overrides (created when the first override is saved)
-- `prompts/catalog/` contains packaged or additional prompt bundles (read-only)
+- `prompts/base/` — immutable source files (the system prompt, seeds, examples, tasks, traits, wordlist).
+- `prompts/current/` — editable overrides (created the first time one is saved).
+- `prompts/catalog/` — additional packaged bundles (read-only).
 
-When the app reads a prompt file, it checks `current` first and falls back to `base` if no override exists. Uploading a prompt writes to `current` using the same filename (creating parent directories if needed), and the Revert action deletes matching files from `current` so the app returns to the base versions.
+When a prompt is read, `prompt_store.py` checks `current/` first and falls back to
+`base/`. Uploading writes to `current/` under the same relative filename; **only names
+that already exist in `base/` are accepted**. The Settings tab can download the resolved
+file, upload an override, or **Revert** (delete all `current/` overrides) to return to
+the base versions. Editing prompts reloads them live via `orchestrator.reload_prompts()`.
 
-Only filenames that already exist in `prompts/base/` are accepted for upload.
+---
 
-## Project Structure
+## Authoring intents and patterns
+
+**Add a motion pattern:** drop a `patterns/<name>.json` describing the pattern (it gets
+serialized into the system prompt). If the device firmware needs a slot for it, add the
+name to `AI_TO_DEVICE_PATTERN_MAP` in `config.py`.
+
+**Add an intent:** create `intents/<intent>/` and one JSON file per intensity band. A
+band looks like:
+
+```json
+{
+  "name": "tease_hard",
+  "description": "Harder, but still teasing.",
+  "intensity_range": [0.7, 1.0],
+  "pattern": "simple_stroke",
+  "speed": 20,
+  "depth": 30,
+  "base": 0,
+  "duration_ms": 6000,
+  "easing": "sine_in_out",
+  "variations": [
+    { "probability": 0.5, "pattern": "half_n_half", "speed": 10, "depth": 40 },
+    { "probability": 0.3, "pattern": "stop_n_go",  "speed": 30, "depth": 20, "intensity": 50 },
+    { "probability": 0.2, "speed": 5, "depth": 40 }
+  ]
+}
+```
+
+`intensity_range` is required; `variations` are optional and chosen by weighted
+probability and merged over the band's base parameters. Intents reload live (`reload()`),
+and the model only emits intents that have band files, so keep the prompt's intent list
+in sync with what's on disk.
+
+---
+
+## HTTP API
+
+Selected endpoints (see `routes.py` for the full set):
+
+**Session**
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/start` | Start a session (`n_turns`, `persona`, `pacing`, `model`). |
+| `POST` | `/api/pause` · `/api/resume` · `/api/clear` | Session controls. |
+| `GET`  | `/api/poll?since=<n>` | Fetch newly displayed turns. |
+| `POST` | `/api/video/ended` | Signal the on-screen clip finished. |
+| `GET`  | `/api/health` | Big-model health + orchestrator status. |
+
+**Settings & prompts**
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` / `POST` | `/api/settings` | Read all settings / save all settings. |
+| `POST` | `/api/settings/test/<google\|groq\|stash>` | Validate one service. |
+| `GET` / `POST` | `/api/prompts/<name>` | Download / upload an override. |
+| `POST` | `/api/prompts/revert` | Delete all overrides. |
+| `GET`  | `/api/intents` | List intents and intensity coverage. |
+
+**Devices**
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` / `POST` | `/api/device/types` · `/api/device/set` | List / switch device type. |
+| `POST` | `/api/device/connect` · `/api/device/disconnect` · `/api/device/home` | Connection control. |
+| `GET`  | `/api/device/state` · `/api/device/stream` | State snapshot / live SSE stream. |
+| `POST` | `/api/device/command` | Send a raw command dict. |
+| `POST` | `/api/device/serial_emulator/start` · `/stop` | Local PTY + emulator. |
+| `GET` / `POST` | `/api/coyote/scan` · `/api/coyote/command` | Coyote BLE scan / command. |
+
+**Media**
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET`  | `/api/stash/scenes` | List tagged scenes (`?refresh=1` to force). |
+| `POST` | `/api/stash/funscript/<id>` | Load a scene's funscript into the player. |
+| `GET`  | `/api/stash/video/<id>` | Proxy a scene's video stream (Range-aware). |
+| `POST` | `/api/funscript/upload` · `/play` · `/load` · `/start` · `/pause` · `/resume` · `/seek` · `/stop` | Funscript playback. |
+| `GET`  | `/api/funscript/status` · `/list` · `/videos` | Player status / file lists. |
+| `POST` | `/api/tts/synthesize` · `/clear` | TTS synth / cache clear. |
+| `GET`  | `/api/tts/audio/<key>` | Fetch cached audio. |
+
+---
+
+## Project structure
 
 ```text
-<project root>/
-├── main.py               # Entry point
-├── app_factory.py        # Flask app factory
-├── routes.py             # All HTTP routes
-├── config.py             # Central settings (env-overridable)
-├── settings_store.py     # Local settings load/save helpers
-├── prompt_store.py       # Base/current prompt resolution helpers
-├── ai_connector.py       # Google & Groq AI client wrappers
-├── brain.py              # Session orchestrator
-├── prompt_builder.py     # Prompt construction + diversity strategies
-├── response_parser.py    # JSON extraction from model output
-├── session_manager.py    # In-memory session + device state tracking
-├── pattern_loader.py     # Loads pattern definitions from patterns/
-├── device_bridge.py      # WebSocket / Serial device communication
-├── device_emulator.py    # Standalone OSSM firmware emulator
-├── prompts/
-│   ├── base/             # Immutable prompt templates, seeds, examples
-│   ├── current/          # Editable user overrides (created on first save)
-│   └── catalog/          # Additional packaged prompts or bundles
-├── patterns/             # One .json file per motion pattern
-├── templates/
-│   ├── index.html        # GUI shell
-│   ├── tab_setup.html
-│   ├── tab_manual.html
-│   ├── tab_ai.html
-│   ├── tab_settings.html
-│   └── block_device_gauge.html
-└── static/
-    ├── css/
-    │   └── style.css     # GUI styles
-    └── js/
-        ├── app.js        # Shared GUI logic
-        ├── setup.js
-        ├── manual.js
-        ├── ai.js
-        ├── settings.js
-        └── custom.js
+AIMO/
+├── main.py                 # Entry point
+├── app_factory.py          # Flask app factory (logging, routes, default device)
+├── routes.py               # All HTTP routes; owns the orchestrator + funscript player
+├── config.py               # Central defaults (env-overridable); pattern→slot map
+├── settings_store.py       # Local settings load / normalize / save
+├── orchestrator.py         # Producer/consumer loops + session lifecycle
+├── ai_connector.py         # Google & Groq stateful chat connectors
+├── brain.py                # Session/creative coordinator
+├── prompt_builder.py       # System / seed / per-turn prompt construction
+├── prompt_store.py         # base/current prompt resolution
+├── response_parser.py      # Raw model text → Turn objects
+├── intent_compiler.py      # (intent, intensity) → CompiledCommand
+├── pattern_loader.py       # Loads patterns/*.json
+├── session_manager.py      # In-memory turns + effective device state
+├── stash_client.py         # Stash GraphQL/media client (+ stdlib SOCKS5)
+├── funscript_player.py     # Funscript scheduling/playback
+├── tts.py                  # Kokoro TTS with word timing + cache
+├── device_bridge.py        # Legacy accessor → registry singleton
+├── device_emulator.py      # Standalone OSSM firmware emulator
+├── heart_rate_sensor.py    # Standalone BLE heart-rate experiment (not wired into the app)
+├── devices/
+│   ├── base.py             # AbstractDevice + DeviceState
+│   ├── ossm.py             # OSSM (WebSocket / serial)
+│   ├── coyote_ble.py       # Coyote 3.0 (BLE)
+│   └── registry.py         # Active-device factory/singleton
+├── intents/                # <intent>/<intensity-band>.json
+├── patterns/               # Motion patterns + custom/ and funscripts/ + videos/
+├── prompts/{base,current,catalog}/
+├── templates/              # index.html + tab_*.html partials
+├── static/{css,js}/        # UI styles and per-tab scripts
+└── logs/                   # API response logs
 ```
 
-## Running
+---
 
-```bash
-python main.py
-```
+## Configuration reference
 
-Open http://localhost:5000 in your browser.
-
-## Environment Variables
+Every value below is an environment-variable default in `config.py`; most are also
+editable at runtime from the Settings tab (which persists to
+`~/.config/aimee/settings.json`).
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `GOOGLE_MODEL` | Default Google model | `gemma-4-31b-it` |
-| `GROQ_MODEL` | Default Groq model | `openai/gpt-oss-120b` |
-| `FLASK_PORT` | HTTP server port | `5000` |
-| `FLASK_DEBUG` | Enable Flask debug mode | `true` |
-| `DEVICE_WS_URL` | Default device WebSocket URL | `ws://localhost:8888` |
+| `GOOGLE_MODEL` / `GROQ_MODEL` | Default model per provider | `gemma-4-31b-it` / `openai/gpt-oss-120b` |
+| `SMALL_MODEL` | Fast filler model | `gemma-3-12b-it` |
+| `GEN_TEMPERATURE` / `GEN_TOP_P` / `GEN_TOP_K` | Generation sampling | `1.2` / `0.90` / `60` |
+| `GOOGLE_TIMEOUT` / `GROQ_TIMEOUT` | API timeouts (s) | `240` / `240` |
+| `BIG_MAX_RETRIES` / `BIG_RETRY_DELAY` | Big-model retry policy | `3` / `30` |
+| `DEFAULT_TURNS` | Default session length | `5` |
+| `BANNED_PHRASE_WINDOW` | Recent lines fed back as "do not repeat" | `20` |
+| `VIDEO_CHANCE` | Per-turn chance of a video interlude | `0.10` |
+| `KOKORO_VOICE` / `KOKORO_SPEED` / `KOKORO_DEVICE` | TTS voice / speed / device | `af_heart` / `1.0` / `auto` |
+| `STASH_URL` / `STASH_API_KEY` / `STASH_TAG` | Stash server, key, playable tag | `""` / `""` / `playable` |
+| `STASH_VIDEO_ENABLED` | Allow video interludes | `true` |
+| `STASH_PROXY_ENABLED` / `STASH_PROXY_ADDRESS` | SOCKS5 tunnel | `false` / `""` |
+| `DEVICE_WS_URL` | Default OSSM WebSocket URL | `ws://localhost:8888` |
+| `COYOTE_BLE_NAME` | Coyote BLE advertised name | `47L121000` |
+| `COYOTE_SOFT_LIMIT_A` / `_B` | Channel strength caps | `100` / `100` |
+| `COYOTE_DEFAULT_FREQ_MS` | Coyote pulse frequency (ms) | `100` |
+| `FLASK_HOST` / `FLASK_PORT` / `FLASK_DEBUG` | Server bind/port/debug | `0.0.0.0` / `5000` / `true` |
+| `LOG_LEVEL` | Root log level | `INFO` |
 
-API keys are managed in app settings and stored in the local settings file managed by `settings_store.py`.
+Watermark/timing internals (`DISPLAY_INTERVAL`, `LOW_WATERMARK`, `HIGH_WATERMARK`,
+`GENERATOR_SLEEP`) are settable from the Settings tab as well.
+
+API keys are never committed to source — they live only in the local settings file.
+
+---
+
+## Dependencies
+
+**Core** (`requirements.txt`): `Flask`, `google-genai`, `websockets`, `pyserial`.
+
+**Optional, lazy-loaded** — install as needed:
+
+- **Groq** — none beyond the stdlib (uses `urllib`).
+- **TTS** — `kokoro`, `soundfile`, `numpy`, and `misaki[en]`.
+- **Coyote BLE / heart-rate sensor** — `bleak` (and `pynput` for the standalone heart-rate experiment).
+- **Serial emulator** — the `socat` system package.
+
+The app starts and runs without the optional packages; features that need a missing
+package surface a clear error only when first used.
