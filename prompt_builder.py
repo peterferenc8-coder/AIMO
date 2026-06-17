@@ -16,7 +16,6 @@ from typing import Any
 from config import (
     BANNED_PHRASE_WINDOW,
     EXAMPLES_DIR,
-    OPENING_PATTERNS_FILE,
     PACING_STRATEGIES_FILE,
     PERSONA_MOODS_FILE,
     PROMPT_FILE,
@@ -68,10 +67,6 @@ def get_persona_moods() -> list[str]:
 
 def get_pacing_strategies() -> list[str]:
     return _read_nonempty_lines(PACING_STRATEGIES_FILE)
-
-
-def get_opening_patterns() -> list[str]:
-    return _read_nonempty_lines(OPENING_PATTERNS_FILE)
 
 
 class PromptBuilder:
@@ -192,6 +187,9 @@ class PromptBuilder:
         if "{{PATTERNS_BLOCK}}" in prompt:
             prompt = prompt.replace("{{PATTERNS_BLOCK}}", pattern_block)
 
+        if "{{EXAMPLES_BLOCK}}" in prompt:
+            prompt = prompt.replace("{{EXAMPLES_BLOCK}}", "\n\n".join(self._examples))
+
         if video_enabled:
             prompt = prompt.replace("{{#VIDEO}}", "").replace("{{/VIDEO}}", "")
         else:
@@ -255,7 +253,6 @@ class PromptBuilder:
         self._opening_intents = get_opening_intents()
         self._persona_moods = get_persona_moods()
         self._pacing_strategies = get_pacing_strategies()
-        self._opening_patterns = get_opening_patterns()
 
         self._user_turn_task_template = _read_text_file(USER_TURN_TASK_FILE)
 

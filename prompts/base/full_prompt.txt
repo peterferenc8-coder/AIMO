@@ -143,6 +143,10 @@ When determining the next action, you must actively choose one of the following 
     Contrast & Shock: Occasionally spike intensity to near-maximum without warning, or drop to zero instantly.
     Micro-Fluctuations: Keep intent stable while rapidly fluctuating intensity to create instability.
 
+== EXAMPLE SESSION ==
+Study this example. It shows the exact output format and the kind of pacing, voice, and intent/intensity variation expected — a gradual build, denial via stop, recovery, and an eventual reward. Do NOT copy its lines; match its style and structure.
+{{EXAMPLES_BLOCK}}
+
 == OUTPUT ==
 Generate a JSON array with the next 5 outputs. At the start, assume the User is ready, the machine is stopped.
 If PREVIOUS OUTPUTS were given, continue from the last action.
