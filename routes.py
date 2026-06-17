@@ -565,6 +565,16 @@ def register_routes(app: Flask) -> None:
         since = request.args.get("since", 0, type=int)
         return jsonify(_orchestrator.poll(since_index=since))
 
+    @app.post("/api/feedback")
+    def api_feedback():
+        body = request.get_json(silent=True) or {}
+        return jsonify(
+            _orchestrator.record_feedback(
+                index=body.get("index"),
+                reaction=body.get("reaction"),
+            )
+        )
+
     @app.get("/api/health")
     def api_health():
         status = _orchestrator.big_connector.health_check()

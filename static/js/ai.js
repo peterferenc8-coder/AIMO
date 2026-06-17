@@ -269,6 +269,39 @@ async function playAiVideo(info) {
   }
 }
 
+// ── Feedback (like / love / dislike / ban) ─────────────────────────────────
+// like/love/dislike are mutually exclusive per card; ban is a separate sticky
+// flag (a line can be both, e.g. disliked AND banned). Clicking an already-
+// active button toggles it off (clear / unban). State is local to the card —
+// cards are append-only and never re-rendered, so no server echo needed.
+async function sendFeedback(index, reaction, fbBar, btn) {
+  const wasActive = btn.classList.contains('active');
+  let action;
+
+  if (reaction === 'ban') {
+    btn.classList.toggle('active', !wasActive);
+    action = wasActive ? 'unban' : 'ban';
+  } else {
+    fbBar.querySelectorAll('.fb-btn:not(.fb-ban)').forEach(b => b.classList.remove('active'));
+    if (wasActive) {
+      action = 'clear';            // toggling off the active reaction
+    } else {
+      btn.classList.add('active');
+      action = reaction;
+    }
+  }
+
+  try {
+    await fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index, reaction: action }),
+    });
+  } catch (err) {
+    console.error('Feedback failed:', err);
+  }
+}
+
 // ── Stream cards ───────────────────────────────────────────────────────────
 function makeAICard(item) {
   const card = document.createElement('div');
@@ -287,9 +320,20 @@ function makeAICard(item) {
       <span class="turn-time">${time}</span>
     </div>
     <div class="turn-speech"></div>
+    <div class="turn-feedback" data-index="${item.index}">
+      <button class="fb-btn" data-reaction="like" title="Like — more like this">👍</button>
+      <button class="fb-btn" data-reaction="love" title="Love — stay in this register">❤️</button>
+      <button class="fb-btn" data-reaction="dislike" title="Dislike — avoid this direction">👎</button>
+      <button class="fb-btn fb-ban" data-reaction="ban" title="Ban — never say this again">🚫</button>
+    </div>
   `;
 
   const speechEl = card.querySelector('.turn-speech');
+
+  const fbBar = card.querySelector('.turn-feedback');
+  fbBar.querySelectorAll('.fb-btn').forEach(btn => {
+    btn.addEventListener('click', () => sendFeedback(item.index, btn.dataset.reaction, fbBar, btn));
+  });
 
   // If we have TTS data, show words as spans and sync with audio
   if (item.audio_url && item.words && item.words.length > 0) {

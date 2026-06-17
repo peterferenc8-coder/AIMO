@@ -21,12 +21,22 @@ from config import (
     PROMPT_FILE,
     USER_TURN_TASK_FILE,
 )
+from feedback_store import load_banned_phrases
 from pattern_loader import PatternLoader
 from prompt_store import resolve_prompt_path
 from response_parser import Turn
 from session_manager import DeviceState
 
 log = logging.getLogger(__name__)
+
+# How the user's reaction to a recent line is described back to the model.
+# Reacted lines are shown in full (no truncation) so the model can emulate or
+# avoid them precisely. Banned lines are handled separately and permanently.
+_REACTION_NOTES = {
+    "love": "❤️ the user LOVED this — stay in this register and build on it",
+    "like": "👍 the user liked this — more in this direction",
+    "dislike": "👎 the user disliked this — steer away from this style/direction",
+}
 
 # Marks an optional section in a prompt template: kept when the feature is on,
 # stripped entirely (markers and content) when it is off.
@@ -121,14 +131,32 @@ class PromptBuilder:
             state_desc = self._format_device_state(device_state)
             sections.append(f"Current state: {state_desc}")
 
-        # D) Banned phrases (last N turns, truncated heavily)
-        recent_speech = [
-            t.speech for t in session_turns[-self.banned_phrase_window:]
-        ]
-        if recent_speech:
-            # Only send first 50 chars of each to save tokens
-            banned = "\n".join(f'  - "{s[:50]}..."' for s in recent_speech)
-            sections.append(f"Recent speech (do NOT repeat):\n{banned}")
+        # C) Recent speech (last N turns) — used both to avoid repetition and to
+        # surface the user's reactions. Unreacted lines are truncated to save
+        # tokens; lines the user reacted to are shown in full and annotated so
+        # the model can emulate (like/love) or avoid (dislike) them precisely.
+        recent_turns = session_turns[-self.banned_phrase_window:]
+        if recent_turns:
+            lines = []
+            for t in recent_turns:
+                note = _REACTION_NOTES.get(getattr(t, "reaction", None))
+                if note:
+                    lines.append(f'  - "{t.speech}"  →  {note}')
+                else:
+                    lines.append(f'  - "{t.speech[:50]}..."')
+            sections.append(
+                "Recent speech (do NOT repeat verbatim). Where a line shows the "
+                "user's reaction, weight it strongly:\n" + "\n".join(lines)
+            )
+
+        # C2) Persistent banned phrases (🚫) — hard constraint, never expires.
+        banned_phrases = load_banned_phrases()
+        if banned_phrases:
+            blocked = "\n".join(f'  - "{p}"' for p in banned_phrases)
+            sections.append(
+                "BANNED — never say these lines again, or anything close to them:\n"
+                + blocked
+            )
 
         # D) Session continuity hint (only after many turns)
         if len(session_turns) >= 15:

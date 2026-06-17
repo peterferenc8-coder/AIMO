@@ -37,10 +37,11 @@ setInterval(checkHealth, 15000);
 function showBanner(msg, kind = 'error') {
   const banner = $('error-banner');
   if (!banner) return;
-  banner.style.display = 'block';
+  banner.style.display = 'flex';
   banner.classList.remove('banner-error', 'banner-info');
   banner.classList.add(kind === 'info' ? 'banner-info' : 'banner-error');
-  banner.textContent = (kind === 'info' ? 'ℹ ' : '⚠ ') + msg;
+  const msgEl = $('error-banner-msg');
+  if (msgEl) msgEl.textContent = (kind === 'info' ? 'ℹ ' : '⚠ ') + msg;
 }
 
 function showError(msg) {
@@ -145,6 +146,10 @@ async function sendDeviceCmd(payload) {
 $('btn-global-stop').addEventListener('click', () => {
   sendDeviceCmd({ cmd: 'stop' });
 });
+
+// ── Dismissable error banner ────────────────────────────────────────────────
+const errorBannerClose = $('error-banner-close');
+if (errorBannerClose) errorBannerClose.addEventListener('click', hideError);
 
 // ── Expose globals ─────────────────────────────────────────────────────────
 window.App = { showError, showInfo, hideError, setDeviceStatus, openDeviceStream, closeDeviceStream, sendDeviceCmd };

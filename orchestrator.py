@@ -40,6 +40,7 @@ from config import (
 )
 from ai_connector import GoogleAIConnector, GroqAIConnector
 from brain import Brain
+from feedback_store import add_banned_phrase, remove_banned_phrase
 from prompt_builder import PromptBuilder
 from response_parser import Commands, ResponseParser, Turn
 from session_manager import SessionManager
@@ -143,6 +144,12 @@ class SessionOrchestrator:
         self._generator_thread: threading.Thread | None = None
         self._big_thread: threading.Thread | None = None
         self._big_in_flight = False
+        # Bumped on every start(); the display/generator loops capture their
+        # epoch and exit as soon as it changes. This kills threads from a prior
+        # session that are still mid-sleep when a new session begins (otherwise
+        # they resurrect — they'd wake to find state back at "running" and keep
+        # draining the buffer, doubling the effective display rate).
+        self._session_epoch = 0
 
         # Set by the frontend when an on-screen video clip stops playing
         # (natural end, seek-to-end, skip, or close). Releases the display
@@ -244,12 +251,15 @@ class SessionOrchestrator:
 
         with self.lock:
             self.state = "running"
+            self._session_epoch += 1
+            session_epoch = self._session_epoch
             self._n_turns = self.HIGH_WATERMARK
             self._persona = resolved_persona
             self._pacing = resolved_pacing
             self._pending.clear()
             self._displayed.clear()
             self._display_index = 0
+            self._big_in_flight = False
 
             self.session.clear()
             self.brain.clear_session()
@@ -330,12 +340,12 @@ class SessionOrchestrator:
             self.big_connector.model,
         )
 
-        # Start the two independent loops
+        # Start the two independent loops, bound to this session's epoch.
         self._display_thread = threading.Thread(
-            target=self._display_loop, daemon=True, name="display"
+            target=self._display_loop, args=(session_epoch,), daemon=True, name="display"
         )
         self._generator_thread = threading.Thread(
-            target=self._generator_loop, daemon=True, name="generator"
+            target=self._generator_loop, args=(session_epoch,), daemon=True, name="generator"
         )
         self._display_thread.start()
         self._generator_thread.start()
@@ -400,6 +410,60 @@ class SessionOrchestrator:
                 "pending_count": len(self._pending),
             }
 
+    # ── Feedback: user reactions to displayed turns ─────────────────────────
+
+    #: Reactions that are transient (attached to the in-memory Turn and only
+    #: matter while it stays inside the rolling banned-phrase window).
+    _ROLLING_REACTIONS = {"like", "love", "dislike"}
+
+    def record_feedback(self, index: Any, reaction: Any) -> dict:
+        """
+        Record (or clear) a user reaction to the displayed turn at ``index``.
+
+        Accepted actions:
+          - ``like`` / ``love`` / ``dislike`` — set the transient reaction on
+            the in-memory Turn. It influences prompts only while that turn
+            remains within ``BANNED_PHRASE_WINDOW``.
+          - ``clear`` — remove that transient reaction.
+          - ``ban`` — persist the spoken line to the cross-session banned store
+            so it is never said again. Independent of the transient reaction.
+          - ``unban`` — remove the spoken line from the banned store.
+
+        Display index N maps to ``brain.session_turns[N]`` because turns are
+        recorded and displayed in the same FIFO order.
+        """
+        reaction = str(reaction).strip().lower() if reaction is not None else ""
+        valid = self._ROLLING_REACTIONS | {"clear", "ban", "unban"}
+        if reaction not in valid:
+            return {"ok": False, "error": f"Unknown reaction: {reaction!r}"}
+
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Invalid index"}
+
+        with self.lock:
+            turns = self.brain.session_turns
+            if index < 0 or index >= len(turns):
+                return {"ok": False, "error": f"No turn at index {index}"}
+            turn = turns[index]
+            speech = turn.speech
+            if reaction in self._ROLLING_REACTIONS:
+                turn.reaction = reaction
+            elif reaction == "clear":
+                turn.reaction = None
+
+        # Bans live in the persistent store (file IO) outside the lock and are
+        # independent of the transient reaction above.
+        result = {"ok": True, "index": index, "reaction": reaction}
+        if reaction == "ban" and speech:
+            result["banned"] = add_banned_phrase(speech)
+        elif reaction == "unban" and speech:
+            result["unbanned"] = remove_banned_phrase(speech)
+
+        log.info("Feedback recorded: index=%d reaction=%s", index, reaction)
+        return result
+
     @property
     def status(self) -> dict:
         with self.lock:
@@ -416,20 +480,23 @@ class SessionOrchestrator:
 
     # ── Display loop (consumer) ─────────────────────────────────────────────
 
-    def _display_loop(self) -> None:
+    def _display_loop(self, epoch: int) -> None:
         """
         Steady clock: pop one item from the buffer every DISPLAY_INTERVAL seconds.
         Applies device commands and records the display.
 
         TTS synthesis happens here so that audio generation time does NOT
         block the producer (model generation) or the poll() endpoint.
+
+        Bound to ``epoch``: exits the moment a newer session starts, so a thread
+        left mid-sleep by a stop/restart can't keep draining the buffer.
         """
         while True:
             should_sleep = False
             item: DisplayItem | None = None
 
             with self.lock:
-                if self.state == "idle":
+                if self.state == "idle" or epoch != self._session_epoch:
                     break
                 if self.state == "paused":
                     should_sleep = True
@@ -465,7 +532,7 @@ class SessionOrchestrator:
                 hold_ms = item.video.get("duration_ms") or 0
                 self._wait_video_done(hold_ms / 1000.0 if hold_ms else self.DISPLAY_INTERVAL)
             else:
-                time.sleep(self.DISPLAY_INTERVAL)
+                self._sleep_session(self.DISPLAY_INTERVAL, epoch)
 
     def _sleep_while_running(self, seconds: float) -> None:
         """Sleep up to `seconds`, waking early if the session is stopped/cleared."""
@@ -475,6 +542,22 @@ class SessionOrchestrator:
                 if self.state == "idle":
                     return
             time.sleep(min(0.5, deadline - time.monotonic()))
+
+    def _sleep_session(self, seconds: float, epoch: int) -> None:
+        """
+        Sleep up to `seconds`, waking early if the session is stopped or a newer
+        session has started (epoch changed). Keeps long display/generation waits
+        responsive to stop/restart instead of running out the full interval.
+        """
+        deadline = time.monotonic() + max(0.0, seconds)
+        while True:
+            with self.lock:
+                if self.state == "idle" or epoch != self._session_epoch:
+                    return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(0.5, remaining))
 
     def _wait_video_done(self, max_seconds: float) -> None:
         """
@@ -494,7 +577,7 @@ class SessionOrchestrator:
 
     # ── Generator loop (producer) ─────────────────────────────────────────
 
-    def _generator_loop(self) -> None:
+    def _generator_loop(self, epoch: int) -> None:
         max_backoff = 60.0
 
         while True:
@@ -503,7 +586,7 @@ class SessionOrchestrator:
             buffer_depth = 0
 
             with self.lock:
-                if self.state == "idle":
+                if self.state == "idle" or epoch != self._session_epoch:
                     break
                 if self.state == "paused":
                     should_sleep_paused = True
@@ -515,18 +598,18 @@ class SessionOrchestrator:
                     )
 
             if should_sleep_paused:
-                time.sleep(1.0)
+                self._sleep_session(1.0, epoch)
             elif should_generate:
                 log.info("Buffer low (%d <= %d) — requesting big model", buffer_depth, self.LOW_WATERMARK)
                 self._request_big_model()
 
                 # Adaptive wait: longer after each failure
                 backoff = min(5.0 * (2 ** self._consecutive_failures), max_backoff)
-                time.sleep(backoff)
+                self._sleep_session(backoff, epoch)
             else:
                 with self.lock:
                     self._consecutive_failures = 0
-                time.sleep(self.GENERATOR_SLEEP)
+                self._sleep_session(self.GENERATOR_SLEEP, epoch)
 
     # ── Big model worker ────────────────────────────────────────────────────
 
