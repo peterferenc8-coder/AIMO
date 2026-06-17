@@ -13,6 +13,8 @@ PATTERNS_DIR   = BASE_DIR / "patterns"
 PROMPTS_DIR    = BASE_DIR / "prompts"
 APP_CONFIG_DIR = Path.home() / ".config" / "aimee"
 SETTINGS_FILE  = APP_CONFIG_DIR / "settings.json"
+# Persistent, cross-session list of lines the user banned (🚫).
+BANNED_PHRASES_FILE = APP_CONFIG_DIR / "banned_phrases.json"
 BASE_PROMPTS_DIR = PROMPTS_DIR / "base"
 CURRENT_PROMPTS_DIR = PROMPTS_DIR / "current"
 

@@ -22,6 +22,7 @@ of the Flask process.
   - [Lifecycle of a turn](#lifecycle-of-a-turn)
   - [The AI consumer / connectors](#the-ai-consumer--connectors)
   - [Prompt system](#prompt-system)
+  - [User feedback](#user-feedback)
   - [Intents and pattern translation](#intents-and-pattern-translation)
   - [Devices](#devices)
   - [Stash integration](#stash-integration)
@@ -46,6 +47,7 @@ of the Flask process.
 - **Stash media server** — pull random tagged scenes, proxy their video through Flask (keeping the API key server-side), and drive the device from each scene's funscript. Optional SOCKS5 tunnelling.
 - **Funscript playback** — upload/load `.funscript` files or play scene funscripts, with seek/pause/resume and latency/invert tuning.
 - **Local TTS** — Kokoro synthesizes speech with word-level timing so the UI highlights each word as it is spoken.
+- **Live feedback** — like / love / dislike / ban any displayed line; reactions are fed back into the prompt to steer the AI, and bans persist across sessions so a banned line is never spoken again.
 - **Fully settable runtime config** — generation params, pacing/buffering, timeouts, TTS voice, device limits, and more, all editable from the Settings tab with a global save and per-service connectivity tests.
 - **Built-in emulators** — a standalone OSSM firmware emulator and a one-click serial (PTY) emulator for development without hardware.
 
@@ -108,6 +110,7 @@ Key modules:
 | `response_parser.py` | Extract structured turns (speech/intent/intensity) from raw model text. |
 | `intent_compiler.py` | Map `(intent, intensity)` → concrete device command. |
 | `session_manager.py` | In-memory turn history + effective device state. |
+| `feedback_store.py` | Persistent banned-phrase store for cross-session feedback (🚫). |
 | `devices/` | Device abstraction (`base`), implementations (`ossm`, `coyote_ble`), and a `registry` singleton. |
 | `stash_client.py` | GraphQL + media accessor for a Stash server, with stdlib SOCKS5 support. |
 | `funscript_player.py` | Schedules funscript actions and streams positions to the device. |
@@ -148,7 +151,27 @@ Both are **stateful** (system prompt sent once per session), expose `validate_ap
 
 - **System prompt** — persona definition + the patterns block (`PatternLoader.to_prompt_block()`) + state info, sent once at session start.
 - **Seed prompt** — the first user message: a randomly chosen persona *mood*, *pacing strategy*, and opening pattern, drawn from the seed files.
-- **Per-turn prompt** — minimal fresh context: any user event, the current device state, and a **banned-phrase window** (the last `banned_phrase_window` speech lines, truncated) so the model avoids repeating itself.
+- **Per-turn prompt** — minimal fresh context: any user event, the current device state, a **recent-speech window** (the last `banned_phrase_window` lines) used both to avoid repetition and to surface the user's reactions, plus a persistent **banned-phrases** block (see [User feedback](#user-feedback)).
+
+### User feedback
+
+Every displayed turn carries four reaction buttons — 👍 like, ❤️ love, 👎 dislike,
+and 🚫 ban — that let you steer the AI in real time. Clicking a button posts to
+`POST /api/feedback {index, reaction}`; the orchestrator maps the display index back to
+the matching `Turn` (display and history share one FIFO order). Clicking an active button
+again clears it (`clear`/`unban`).
+
+Reactions wire back into the prompt in two ways:
+
+- **Transient (like / love / dislike)** — attached to the in-memory `Turn`. While that
+  turn stays inside the rolling recent-speech window, its reaction is shown to the model
+  in full (unreacted lines stay truncated) with a note to lean into liked/loved styles or
+  steer away from disliked ones. The reaction ages out with the turn and dies with the
+  session. like/love/dislike are mutually exclusive per turn.
+- **Persistent (ban)** — the spoken line is written to `~/.config/aimee/banned_phrases.json`
+  (`feedback_store.py`) and injected into every per-turn prompt as a hard "never say this
+  again" constraint, in this session and all future ones, until un-banned. A ban is
+  independent of the transient reaction, so a line can be both disliked *and* banned.
 
 ### Intents and pattern translation
 
@@ -304,6 +327,7 @@ Selected endpoints (see `routes.py` for the full set):
 | `POST` | `/api/start` | Start a session (`n_turns`, `persona`, `pacing`, `model`). |
 | `POST` | `/api/pause` · `/api/resume` · `/api/clear` | Session controls. |
 | `GET`  | `/api/poll?since=<n>` | Fetch newly displayed turns. |
+| `POST` | `/api/feedback` | React to a displayed turn (`index`, `reaction` = `like`/`love`/`dislike`/`clear`/`ban`/`unban`). |
 | `POST` | `/api/video/ended` | Signal the on-screen clip finished. |
 | `GET`  | `/api/health` | Big-model health + orchestrator status. |
 
@@ -357,6 +381,7 @@ AIMO/
 ├── intent_compiler.py      # (intent, intensity) → CompiledCommand
 ├── pattern_loader.py       # Loads patterns/*.json
 ├── session_manager.py      # In-memory turns + effective device state
+├── feedback_store.py       # Persistent banned-phrase store (cross-session feedback)
 ├── stash_client.py         # Stash GraphQL/media client (+ stdlib SOCKS5)
 ├── funscript_player.py     # Funscript scheduling/playback
 ├── tts.py                  # Kokoro TTS with word timing + cache

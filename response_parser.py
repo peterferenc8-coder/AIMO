@@ -56,6 +56,10 @@ class Turn:
     duration_ms: int | None = None     # NEW: how long this intent lasts
     commands:  Commands = field(default_factory=Commands)
     raw:       dict = field(default_factory=dict)
+    # User reaction from the UI feedback buttons: "like" | "love" | "dislike"
+    # | "ban" | None. Transient (lives with the session); bans are also
+    # persisted separately via feedback_store.
+    reaction:  str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -66,6 +70,7 @@ class Turn:
             "duration_ms": self.duration_ms,
             "commands":  self.commands.as_dict(),
             "raw":       self.raw,
+            "reaction":  self.reaction,
         }
 
 
