@@ -1,4 +1,10 @@
 *.pyc
+__pycache__/
 *.onnx
 *.bin
 logs/
+
+# PyInstaller build artifacts
+build/
+dist/
+out/

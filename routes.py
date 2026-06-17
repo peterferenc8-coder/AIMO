@@ -54,9 +54,13 @@ PLAIN_SETTING_KEYS = (
 )
 SECRET_SETTING_KEYS = ("google_api_key", "groq_api_key", "stash_api_key")
 
-from config import PATTERNS_DIR
+from config import (
+    CUSTOM_PATTERNS_DIR,
+    DEVICE_EMULATOR_SCRIPT,
+    FUNSCRIPT_DIR,
+    VIDEOS_DIR,
+)
 
-CUSTOM_PATTERNS_DIR = PATTERNS_DIR / "custom"
 CUSTOM_PATTERNS_DIR.mkdir(parents=True, exist_ok=True)
 
 log = logging.getLogger(__name__)
@@ -122,10 +126,17 @@ class _SerialEmulatorLauncher:
 
             self.device_port, self.controller_port = self.device_link, self.controller_link
 
-            emulator_path = Path(__file__).resolve().parent / "device_emulator.py"
+            # From source we launch the emulator script with the Python
+            # interpreter.  In a frozen build sys.executable is this app (not a
+            # Python interpreter), so we re-invoke ourselves with a subcommand
+            # that main.py routes to the emulator's entry point.
+            if getattr(sys, "frozen", False):
+                emu_cmd = [sys.executable, "--run-device-emulator", "--serial", self.device_port]
+            else:
+                emu_cmd = [sys.executable, str(DEVICE_EMULATOR_SCRIPT), "--serial", self.device_port]
             try:
                 self._emu_proc = subprocess.Popen(
-                    [sys.executable, str(emulator_path), "--serial", self.device_port],
+                    emu_cmd,
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -770,7 +781,6 @@ def register_routes(app: Flask) -> None:
 
     # ── Funscript ─────────────────────────────────────────────────────────────
 
-    FUNSCRIPT_DIR = PATTERNS_DIR / "funscripts"
     FUNSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
 
     @app.post("/api/funscript/upload")
@@ -937,7 +947,6 @@ def register_routes(app: Flask) -> None:
     
     # ── Funscript Videos ─────────────────────────────────────────────────────
 
-    VIDEOS_DIR = PATTERNS_DIR / "videos"
     VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
 
     @app.post("/api/funscript/video/upload")

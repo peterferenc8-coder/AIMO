@@ -1,0 +1,67 @@
+name: Build & Release
+
+# Build single-file binaries for Linux, Windows, and macOS and attach them to a
+# GitHub Release. Triggered by pushing a version tag (e.g. `git tag v1.0.0 &&
+# git push origin v1.0.0`), or manually from the Actions tab.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset_name: AIMO-linux-x86_64
+            bin_path: dist/AIMO
+          - os: windows-latest
+            asset_name: AIMO-windows-x86_64.exe
+            bin_path: dist/AIMO.exe
+          - os: macos-latest
+            asset_name: AIMO-macos-arm64
+            bin_path: dist/AIMO
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build binary
+        run: pyinstaller aimo.spec
+
+      - name: Rename binary for this platform
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "${{ matrix.bin_path }}" "out/${{ matrix.asset_name }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: out/${{ matrix.asset_name }}
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/${{ matrix.asset_name }}
+          fail_on_unmatched_files: true
