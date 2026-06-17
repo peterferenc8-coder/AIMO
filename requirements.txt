@@ -1,16 +1,12 @@
-# ── Core ─────────────────────────────────────────────────────────────────────
+# Core dependencies — these are bundled into the prebuilt binaries.
 Flask
 google-genai
 websockets
 pyserial
 
-# ── Text-to-speech (Kokoro) ──────────────────────────────────────────────────
-# Kokoro pulls in torch + the misaki G2P frontend; numpy/soundfile handle the
-# audio arrays and WAV output.
-kokoro
-misaki[en]
-soundfile
-numpy
-
-# ── Coyote BLE device ────────────────────────────────────────────────────────
+# Coyote BLE device support (small, kept in the binary).
 bleak
+
+# Text-to-speech (Kokoro) is NOT listed here: it pulls in PyTorch and is too
+# large to bundle, so it is shipped separately. To enable TTS, run from source
+# and also install the extras:  pip install -r requirements-tts.txt
