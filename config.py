@@ -116,6 +116,14 @@ STASH_URL     = os.getenv("STASH_URL", "")          # e.g. http://192.168.1.50:9
 STASH_API_KEY = os.getenv("STASH_API_KEY", "")      # Stash API key (Settings > Security)
 STASH_TAG     = os.getenv("STASH_TAG", "playable")  # only scenes with this tag are playable
 
+# Optional SOCKS5 proxy for reaching the Stash server (e.g. "127.0.0.1:2080").
+STASH_PROXY_ENABLED = os.getenv("STASH_PROXY_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+STASH_PROXY_ADDRESS = os.getenv("STASH_PROXY_ADDRESS", "")
+
+# When disabled, the AI is never offered the play_video intent and no random
+# video interludes are injected — no video clips are ever played.
+STASH_VIDEO_ENABLED = os.getenv("STASH_VIDEO_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+
 # Probability (0.0-1.0) that any given turn is turned into a play_video interlude.
 # The LLM rarely picks play_video on its own, so the orchestrator injects it at
 # this rate to keep video clips appearing roughly this often.

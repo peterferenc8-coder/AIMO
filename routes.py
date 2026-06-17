@@ -227,6 +227,9 @@ def _saved_settings_payload(settings: dict) -> dict:
         "stash_api_key_masked": mask_secret(settings.get("stash_api_key", "")),
         "stash_key_present": bool(str(settings.get("stash_api_key", "") or "").strip()),
         "stash_tag": settings.get("stash_tag", ""),
+        "stash_video_enabled": bool(settings.get("stash_video_enabled", True)),
+        "stash_proxy_enabled": bool(settings.get("stash_proxy_enabled", False)),
+        "stash_proxy_address": settings.get("stash_proxy_address", ""),
     }
 
 
@@ -323,6 +326,9 @@ def register_routes(app: Flask) -> None:
                 "stash_api_key_masked": mask_secret(settings.get("stash_api_key", "")),
                 "stash_key_present": bool(str(settings.get("stash_api_key", "") or "").strip()),
                 "stash_tag": settings.get("stash_tag", ""),
+                "stash_video_enabled": bool(settings.get("stash_video_enabled", True)),
+                "stash_proxy_enabled": bool(settings.get("stash_proxy_enabled", False)),
+                "stash_proxy_address": settings.get("stash_proxy_address", ""),
                 "stash_validation": _validation_from_settings(settings, "stash_validation"),
                 "prompt_names": list_base_prompt_names(),
             }
@@ -344,6 +350,12 @@ def register_routes(app: Flask) -> None:
             "stash_api_key": _keep_existing(body.get("stash_api_key"), current.get("stash_api_key", "")),
             "stash_tag": (str(body["stash_tag"]).strip() if "stash_tag" in body
                           else current.get("stash_tag", "")),
+            "stash_video_enabled": (bool(body["stash_video_enabled"]) if "stash_video_enabled" in body
+                                    else current.get("stash_video_enabled", True)),
+            "stash_proxy_enabled": (bool(body["stash_proxy_enabled"]) if "stash_proxy_enabled" in body
+                                    else current.get("stash_proxy_enabled", False)),
+            "stash_proxy_address": (str(body["stash_proxy_address"]).strip() if "stash_proxy_address" in body
+                                    else current.get("stash_proxy_address", "")),
         }
 
         google_validation = _validate_google_key(next_settings["google_api_key"], next_settings["google_model"])
@@ -461,6 +473,11 @@ def register_routes(app: Flask) -> None:
     @app.post("/api/resume")
     def api_resume():
         return jsonify(_orchestrator.resume())
+
+    @app.post("/api/video/ended")
+    def api_video_ended():
+        """The on-screen clip stopped playing — resume AI device motion now."""
+        return jsonify(_orchestrator.notify_video_ended())
 
     @app.post("/api/clear")
     def api_clear():

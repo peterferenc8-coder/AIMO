@@ -72,7 +72,10 @@
     <div id="ai-video-panel" style="display:none; background:#0a0a0a; border:1px solid #333; border-radius:8px; margin:8px 0; padding:8px; position:relative;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
         <span id="ai-video-title" style="color:#00ffcc; font-size:13px;"></span>
-        <button class="btn btn-sm btn-ghost" id="ai-video-close" title="Stop clip">✕</button>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <button class="btn btn-sm btn-ghost" id="ai-video-skip" title="Skip clip">Skip ⏭</button>
+          <button class="btn btn-sm btn-ghost" id="ai-video-close" title="Stop clip">✕</button>
+        </div>
       </div>
       <video id="ai-video" preload="auto" playsinline controls
              style="width:100%; max-height:55vh; display:block; background:#000; border-radius:4px;"></video>

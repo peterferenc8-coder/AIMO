@@ -12,7 +12,16 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from config import APP_CONFIG_DIR, SETTINGS_FILE, STASH_URL, STASH_API_KEY, STASH_TAG
+from config import (
+    APP_CONFIG_DIR,
+    SETTINGS_FILE,
+    STASH_URL,
+    STASH_API_KEY,
+    STASH_TAG,
+    STASH_PROXY_ENABLED,
+    STASH_PROXY_ADDRESS,
+    STASH_VIDEO_ENABLED,
+)
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "google_api_key": "",
@@ -23,6 +32,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "stash_url": STASH_URL,
     "stash_api_key": STASH_API_KEY,
     "stash_tag": STASH_TAG,
+    "stash_proxy_enabled": STASH_PROXY_ENABLED,
+    "stash_proxy_address": STASH_PROXY_ADDRESS,
+    "stash_video_enabled": STASH_VIDEO_ENABLED,
     "google_validation": {
         "ok": False,
         "message": "Not validated yet",
@@ -65,6 +77,9 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
     settings["stash_url"] = _as_clean_text(settings.get("stash_url")).rstrip("/")
     settings["stash_api_key"] = _as_clean_text(settings.get("stash_api_key"))
     settings["stash_tag"] = _as_clean_text(settings.get("stash_tag"))
+    settings["stash_proxy_enabled"] = bool(settings.get("stash_proxy_enabled", DEFAULT_SETTINGS["stash_proxy_enabled"]))
+    settings["stash_proxy_address"] = _as_clean_text(settings.get("stash_proxy_address"))
+    settings["stash_video_enabled"] = bool(settings.get("stash_video_enabled", DEFAULT_SETTINGS["stash_video_enabled"]))
     settings["google_validation"] = _normalized_validation(settings.get("google_validation"))
     settings["groq_validation"] = _normalized_validation(settings.get("groq_validation"))
     settings["stash_validation"] = _normalized_validation(settings.get("stash_validation"))
