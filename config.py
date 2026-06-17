@@ -17,7 +17,6 @@ BASE_PROMPTS_DIR = PROMPTS_DIR / "base"
 CURRENT_PROMPTS_DIR = PROMPTS_DIR / "current"
 
 PROMPT_FILE    = BASE_PROMPTS_DIR / "full_prompt.txt"
-SMALL_PROMPT_FILE = BASE_PROMPTS_DIR / "small_prompt.txt"
 EXAMPLES_DIR   = BASE_PROMPTS_DIR / "examples" / "big"
 
 PROMPT_SEEDS_DIR = BASE_PROMPTS_DIR / "seeds"
@@ -25,21 +24,13 @@ PERSONA_MOODS_FILE = PROMPT_SEEDS_DIR / "persona_moods.txt"
 PACING_STRATEGIES_FILE = PROMPT_SEEDS_DIR / "pacing_strategies.txt"
 OPENING_PATTERNS_FILE = PROMPT_SEEDS_DIR / "opening_patterns.txt"
 
-PROMPT_RUNTIME_DIR = BASE_PROMPTS_DIR / "runtime"
-SMALL_STATE_STOPPED_FILE = PROMPT_RUNTIME_DIR / "small_state_stopped.txt"
-SMALL_STATE_MOVING_FILE = PROMPT_RUNTIME_DIR / "small_state_moving.txt"
-
 PROMPT_TASKS_DIR = BASE_PROMPTS_DIR / "tasks"
 USER_TURN_TASK_FILE = PROMPT_TASKS_DIR / "user_turn_task.txt"
-SMALL_FALLBACK_TASK_FILE = PROMPT_TASKS_DIR / "small_fallback_task.txt"
-
-SMALL_EXAMPLES_DIR = BASE_PROMPTS_DIR / "examples" / "small"
 
 # ── Intents ─────────────────────────────────────────────────────────────────
 INTENTS_DIR = BASE_DIR / "intents"
 
-# ── Small / Fast Filler Model ────────────────────────────────────────────────
-SMALL_MODEL = os.getenv("SMALL_MODEL", "gemma-3-12b-it")
+# ── Buffer & timing ──────────────────────────────────────────────────────────
 DISPLAY_INTERVAL = 10.0   # seconds between displayed turns
 LOW_WATERMARK = 3         # request more when buffer <= 3
 HIGH_WATERMARK = 10       # generate 10 turns per batch

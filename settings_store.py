@@ -22,7 +22,6 @@ from config import (
     STASH_PROXY_ADDRESS,
     STASH_VIDEO_ENABLED,
     VIDEO_CHANCE,
-    SMALL_MODEL,
     GOOGLE_TIMEOUT,
     GROQ_TIMEOUT,
     BIG_MODEL_MAX_RETRIES,
@@ -58,7 +57,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "stash_video_enabled": STASH_VIDEO_ENABLED,
     "video_chance": VIDEO_CHANCE,
     # ── Generation / model tuning ──────────────────────────────────────────
-    "small_model": SMALL_MODEL,
     "gen_temperature": GENERATION_OPTIONS.get("temperature", 1.2),
     "gen_top_p": GENERATION_OPTIONS.get("top_p", 0.90),
     "gen_top_k": GENERATION_OPTIONS.get("top_k", 60),
@@ -156,7 +154,6 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
     settings["video_chance"] = _as_float(settings.get("video_chance"), d["video_chance"], 0.0, 1.0)
 
     # Generation / model tuning
-    settings["small_model"] = _as_clean_text(settings.get("small_model")) or d["small_model"]
     settings["gen_temperature"] = _as_float(settings.get("gen_temperature"), d["gen_temperature"], 0.0, 2.0)
     settings["gen_top_p"] = _as_float(settings.get("gen_top_p"), d["gen_top_p"], 0.0, 1.0)
     settings["gen_top_k"] = _as_int(settings.get("gen_top_k"), d["gen_top_k"], 0, 1000)
