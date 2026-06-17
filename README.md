@@ -40,7 +40,7 @@ of the Flask process.
 ## Features
 
 - **AI-generated sessions** — a persona produces speech + intent + intensity per turn, paced and de-duplicated to avoid repetition.
-- **Two AI back ends** — Google Generative AI (Gemini/Gemma) and Groq's OpenAI-compatible API, switchable per session; a smaller "filler" model is configurable separately.
+- **Two AI back ends** — Google Generative AI (Gemini/Gemma) and Groq's OpenAI-compatible API, switchable per session.
 - **Intent → motion compiler** — narrative intents (`tease`, `build`, `reward`, `settle`, `stop`) plus a 0.0–1.0 intensity are compiled to concrete device commands via per-intent JSON "bands" with weighted random variations.
 - **Multiple devices** — OSSM (WebSocket or serial) and Coyote 3.0 (BLE), behind a common device abstraction with a live state stream.
 - **Stash media server** — pull random tagged scenes, proxy their video through Flask (keeping the API key server-side), and drive the device from each scene's funscript. Optional SOCKS5 tunnelling.
@@ -235,7 +235,7 @@ connectivity checks. Changing a credential resets that service's stored validati
 "pending".
 
 Settings categories: **Google AI**, **Groq AI**, **Generation** (temperature, top-p,
-top-k, filler model, timeouts, retries), **Session & Pacing** (turns, watermarks,
+top-k, timeouts, retries), **Session & Pacing** (turns, watermarks,
 display interval, generator sleep, banned-phrase window), **Text-to-Speech** (enable,
 voice, speed, device), **Stash** (enable + interlude chance, URL, key, tag, SOCKS5),
 **Device** (default WS URL, Coyote BLE name + soft limits + frequency), and **Prompt
@@ -387,7 +387,6 @@ editable at runtime from the Settings tab (which persists to
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GOOGLE_MODEL` / `GROQ_MODEL` | Default model per provider | `gemma-4-31b-it` / `openai/gpt-oss-120b` |
-| `SMALL_MODEL` | Fast filler model | `gemma-3-12b-it` |
 | `GEN_TEMPERATURE` / `GEN_TOP_P` / `GEN_TOP_K` | Generation sampling | `1.2` / `0.90` / `60` |
 | `GOOGLE_TIMEOUT` / `GROQ_TIMEOUT` | API timeouts (s) | `240` / `240` |
 | `BIG_MAX_RETRIES` / `BIG_RETRY_DELAY` | Big-model retry policy | `3` / `30` |

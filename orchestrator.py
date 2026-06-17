@@ -36,7 +36,6 @@ from config import (
     HIGH_WATERMARK,
     LOW_WATERMARK,
     MODEL_OPTIONS,
-    SMALL_MODEL,
     VIDEO_CHANCE,
 )
 from ai_connector import GoogleAIConnector, GroqAIConnector
@@ -116,13 +115,6 @@ class SessionOrchestrator:
         self.big_connector = self._connector_for_model(default_model)
         self.big_connector.model = default_model
 
-        self.small_connector = GoogleAIConnector(
-            api_key=self._settings.get("google_api_key", ""),
-            model=self.small_model,
-            timeout=self._settings.get("google_timeout", GOOGLE_TIMEOUT),
-            gen_options=self._gen_options(),
-        )
-
         self.brain = Brain()
         self.parser = ResponseParser()
         self.session = SessionManager()
@@ -185,7 +177,6 @@ class SessionOrchestrator:
         self.GENERATOR_SLEEP = float(s.get("generator_sleep", GENERATOR_SLEEP))
         self.RETRY_DELAY = int(s.get("big_model_retry_delay", BIG_MODEL_RETRY_DELAY))
         self.BIG_MAX_RETRIES = int(s.get("big_model_max_retries", self.BIG_MAX_RETRIES))
-        self.small_model = s.get("small_model", SMALL_MODEL)
         self.video_chance = float(s.get("video_chance", VIDEO_CHANCE))
 
     def _push_collaborator_settings(self) -> None:
@@ -218,13 +209,6 @@ class SessionOrchestrator:
             timeout=self._settings.get("groq_timeout", GROQ_TIMEOUT),
             gen_options=gen,
         )
-        self.small_connector.reconfigure(
-            api_key=self._settings.get("google_api_key", ""),
-            model=self.small_model,
-            timeout=self._settings.get("google_timeout", GOOGLE_TIMEOUT),
-            gen_options=gen,
-        )
-
         active_model = self.big_connector.model
         self.big_connector = self._connector_for_model(active_model)
 
@@ -426,7 +410,6 @@ class SessionOrchestrator:
                 "pending": len(self._pending),
                 "device_state": self.session.device_state.as_dict(),
                 "big_model": self.big_connector.model,
-                "small_model": self.small_model,
                 "persona": self._persona,
                 "pacing": self._pacing,
             }

@@ -44,7 +44,7 @@ PLAIN_SETTING_KEYS = (
     "google_model", "groq_model", "tts_enabled",
     "stash_url", "stash_tag", "stash_video_enabled",
     "stash_proxy_enabled", "stash_proxy_address", "video_chance",
-    "small_model", "gen_temperature", "gen_top_p", "gen_top_k",
+    "gen_temperature", "gen_top_p", "gen_top_k",
     "google_timeout", "groq_timeout", "big_model_max_retries", "big_model_retry_delay",
     "default_turns", "banned_phrase_window", "display_interval",
     "low_watermark", "high_watermark", "generator_sleep",

@@ -17,7 +17,6 @@ const SETTING_HELP = {
   gen_temperature: 'Sampling temperature (0–2). Higher is more random/creative, lower is more focused.',
   gen_top_p: 'Nucleus sampling (0–1). Restricts choices to the most probable tokens by cumulative probability.',
   gen_top_k: 'Top-k sampling. Restricts choices to the k most likely tokens (0 disables it).',
-  small_model: 'The fast Google "filler" model used for lightweight generation.',
   google_timeout: 'Seconds to wait for a Google API response before the request fails.',
   groq_timeout: 'Seconds to wait for a Groq API response before the request fails.',
   big_model_max_retries: 'How many times to retry the main model after a failed request.',
