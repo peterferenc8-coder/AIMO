@@ -12,7 +12,6 @@ import logging
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import google.genai as genai
@@ -23,6 +22,7 @@ from config import (
     GOOGLE_TIMEOUT,
     GROQ_MODEL,
     GROQ_TIMEOUT,
+    LOGS_DIR,
 )
 
 log = logging.getLogger(__name__)
@@ -41,9 +41,7 @@ class BaseAIConnector:
         self.model = model
         self.timeout = timeout
         self.gen_options = dict(gen_options) if gen_options else dict(GENERATION_OPTIONS)
-        self.response_log_dir = (
-            Path(__file__).resolve().parent / "logs" / log_dir_name
-        )
+        self.response_log_dir = LOGS_DIR / log_dir_name
 
         self._last_api_ok: bool | None = None
         self._last_api_message: str = "Not validated yet"

@@ -1,4 +1,16 @@
+# ── Core ─────────────────────────────────────────────────────────────────────
 Flask
 google-genai
 websockets
 pyserial
+
+# ── Text-to-speech (Kokoro) ──────────────────────────────────────────────────
+# Kokoro pulls in torch + the misaki G2P frontend; numpy/soundfile handle the
+# audio arrays and WAV output.
+kokoro
+misaki[en]
+soundfile
+numpy
+
+# ── Coyote BLE device ────────────────────────────────────────────────────────
+bleak

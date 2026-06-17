@@ -10,7 +10,7 @@ import logging
 import sys
 from flask import Flask
 
-from config import LOG_LEVEL
+from config import LOG_LEVEL, STATIC_DIR, TEMPLATES_DIR
 from routes import register_routes
 from devices.registry import set_active_device
 
@@ -18,7 +18,14 @@ from devices.registry import set_active_device
 def create_app() -> Flask:
     """Configure logging, create the Flask app, and attach all routes."""
     _setup_logging()
-    app = Flask(__name__)
+    # Point Flask at explicit template/static folders so they resolve correctly
+    # both from source and from a PyInstaller bundle (where they are unpacked
+    # under sys._MEIPASS rather than next to this module).
+    app = Flask(
+        __name__,
+        template_folder=str(TEMPLATES_DIR),
+        static_folder=str(STATIC_DIR),
+    )
     register_routes(app)
     # Initialize default device on startup
     try:

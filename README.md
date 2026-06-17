@@ -16,7 +16,9 @@ of the Flask process.
 ## Table of contents
 
 - [Features](#features)
-- [Quick start](#quick-start)
+- [Download & run](#download--run)
+- [Quick start (from source)](#quick-start-from-source)
+- [Building a release](#building-a-release)
 - [Architecture](#architecture)
   - [The two-loop orchestrator](#the-two-loop-orchestrator)
   - [Lifecycle of a turn](#lifecycle-of-a-turn)
@@ -53,22 +55,92 @@ of the Flask process.
 
 ---
 
-## Quick start
+## Download & run
+
+The easiest way to run AIMO is the **single-file binary** — no Python, no `pip`,
+no setup. Grab the one for your platform from the
+[Releases page](https://github.com/peterferenc8-coder/AIMO/releases):
+
+| Platform | File |
+|----------|------|
+| Linux    | `AIMO-linux-x86_64` |
+| Windows  | `AIMO-windows-x86_64.exe` |
+| macOS    | `AIMO-macos-arm64` |
+
+Then run it:
+
+```bash
+# Linux / macOS — mark executable once, then run
+chmod +x AIMO-linux-x86_64
+./AIMO-linux-x86_64
+```
+
+On Windows, just double-click `AIMO-windows-x86_64.exe`.
+
+The app starts a local server and **opens your browser automatically** at
+<http://localhost:5000>. To set up an AI back end, open the **Settings** tab, paste a
+Google and/or Groq API key, **Save All**, then press **Test Connection**. Once a key
+validates, its models unlock on the **AI Session** tab.
+
+> **Where your data lives.** The binary is self-contained and read-only; everything
+> you create or change at runtime — settings, custom patterns, uploaded
+> funscripts/videos, prompt overrides, and logs — is written to `~/.config/aimee`
+> (`%USERPROFILE%\.config\aimee` on Windows). Point it elsewhere with the
+> `AIMEE_DATA_DIR` environment variable.
+
+> **First launch warnings.** The binaries are unsigned. On macOS, clear the
+> quarantine flag with `xattr -d com.apple.quarantine AIMO-macos-arm64` (or right-click
+> → Open). On Windows, choose **More info → Run anyway** on the SmartScreen prompt.
+
+---
+
+## Quick start (from source)
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-Open <http://localhost:5000>.
+Open <http://localhost:5000> (set `AIMEE_OPEN_BROWSER=1` to auto-open it as the binary does).
 
-`requirements.txt` covers the core (Flask, `google-genai`, `websockets`, `pyserial`).
-Several features are **optional** and lazy-loaded — install them only if you need them
-(see [Dependencies](#dependencies)).
+`requirements.txt` covers the core (Flask, `google-genai`, `websockets`, `pyserial`)
+plus the local TTS (Kokoro) and Coyote BLE extras. Running from source, all runtime
+data stays in the repo working tree exactly as before.
 
 To set up an AI back end, open the **Settings** tab, paste a Google and/or Groq API key,
 **Save All**, then press **Test Connection**. Once a key validates, its models unlock for
 selection on the **AI Session** tab.
+
+---
+
+## Building a release
+
+Releases are built with [PyInstaller](https://pyinstaller.org/) from
+[`aimo.spec`](aimo.spec), which bundles the interpreter, all dependencies, and the
+read-only data (prompts, intents, built-in patterns, templates, static assets) into one
+executable.
+
+```bash
+pip install -r requirements.txt pyinstaller
+pyinstaller aimo.spec
+# → dist/AIMO   (or dist/AIMO.exe on Windows)
+```
+
+Run the binary on the OS you want to ship for — PyInstaller does not cross-compile, so
+each platform's binary must be built on that platform. The
+[`.github/workflows/release.yml`](.github/workflows/release.yml) workflow does this
+automatically: push a version tag and it builds Linux, Windows, and macOS binaries and
+attaches them to a GitHub Release.
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+> **Binary size & first start.** Bundling Kokoro pulls in PyTorch, so the executable is
+> large (hundreds of MB) and a one-file build takes a few seconds to unpack on first run.
+> Kokoro also downloads its voice model from Hugging Face on first synthesis, so initial
+> TTS needs an internet connection.
 
 ---
 
@@ -438,14 +510,17 @@ API keys are never committed to source — they live only in the local settings 
 
 ## Dependencies
 
-**Core** (`requirements.txt`): `Flask`, `google-genai`, `websockets`, `pyserial`.
+`requirements.txt` (and the prebuilt binaries) include:
 
-**Optional, lazy-loaded** — install as needed:
+- **Core** — `Flask`, `google-genai`, `websockets`, `pyserial`.
+- **Local TTS (Kokoro)** — `kokoro`, `misaki[en]`, `soundfile`, `numpy`.
+- **Coyote BLE** — `bleak`.
+
+All of these are still **lazy-loaded**: the app starts and runs even if an optional
+package is missing, and a feature that needs one surfaces a clear error only when first
+used. A few extras are not bundled and remain install-as-needed:
 
 - **Groq** — none beyond the stdlib (uses `urllib`).
-- **TTS** — `kokoro`, `soundfile`, `numpy`, and `misaki[en]`.
-- **Coyote BLE / heart-rate sensor** — `bleak` (and `pynput` for the standalone heart-rate experiment).
-- **Serial emulator** — the `socat` system package.
-
-The app starts and runs without the optional packages; features that need a missing
-package surface a clear error only when first used.
+- **Heart-rate sensor** — `pynput` (for the standalone heart-rate experiment).
+- **Serial emulator** — the `socat` system package (Linux/macOS; used by the one-click
+  PTY emulator on the Setup tab).
