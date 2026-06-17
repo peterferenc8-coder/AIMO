@@ -565,6 +565,102 @@ input[type="range"] {
   color: var(--accent);
 }
 
+/* Multi-field rows inside a card */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+/* Enable/disable toggle pinned at the top of a category */
+.settings-field.settings-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+.settings-field.settings-toggle input[type="checkbox"] {
+  width: auto;
+  flex: 0 0 auto;
+}
+.settings-field.settings-toggle label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* Sticky global save bar */
+.settings-savebar {
+  position: sticky;
+  bottom: 0;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.25);
+}
+.settings-savebar .settings-dirty {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.settings-savebar.dirty .settings-dirty {
+  color: #f2b53c;
+}
+.settings-savebar #settings-save-all {
+  margin-left: auto;
+}
+.settings-savebar.dirty #settings-save-all {
+  box-shadow: 0 0 0 2px rgba(242, 181, 60, 0.4);
+}
+
+/* "?" help affordance after each setting label */
+.settings-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 6px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1;
+  cursor: help;
+  position: relative;
+  vertical-align: middle;
+  user-select: none;
+}
+.settings-help:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.settings-help:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 0;
+  bottom: 150%;
+  width: max-content;
+  max-width: 240px;
+  white-space: normal;
+  text-align: left;
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 7px 9px;
+  font-family: var(--sans, sans-serif);
+  font-size: 11px;
+  line-height: 1.4;
+  z-index: 50;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
 .ai-stream {
   display: flex;
   flex-direction: column;

@@ -28,15 +28,45 @@ log = logging.getLogger(__name__)
 SAMPLE_RATE = 24_000
 VOICE = os.getenv("KOKORO_VOICE", "af_heart")
 KOKORO_SPEED = float(os.getenv("KOKORO_SPEED", "1.0"))
+DEVICE = os.getenv("KOKORO_DEVICE", "auto")  # auto | cpu | cuda
 AUDIO_CACHE_DIR = Path(tempfile.gettempdir()) / "aimee_tts"
 
 # Lazy-import Kokoro so the app can start even if the package is not installed.
 _pipeline = None
+_pipeline_device: str | None = None
+
+
+def configure(voice: str | None = None, speed: float | None = None,
+              device: str | None = None) -> None:
+    """Update default voice/speed/device from settings (live)."""
+    global VOICE, KOKORO_SPEED, DEVICE, _pipeline, _pipeline_device
+    if voice:
+        VOICE = str(voice)
+    if speed is not None:
+        try:
+            KOKORO_SPEED = float(speed)
+        except (TypeError, ValueError):
+            pass
+    if device:
+        new_device = str(device).lower()
+        if new_device != DEVICE:
+            DEVICE = new_device
+            # Force the pipeline to rebuild on the new device next synthesis.
+            _pipeline = None
+            _pipeline_device = None
+
+
+def _resolve_device() -> str:
+    if DEVICE == "cpu":
+        return "cpu"
+    if DEVICE == "cuda":
+        return "cuda"
+    return "cuda" if _cuda_available() else "cpu"
 
 
 def _get_pipeline():
     """Lazy initialiser for the Kokoro KPipeline."""
-    global _pipeline
+    global _pipeline, _pipeline_device
     if _pipeline is not None:
         return _pipeline
 
@@ -48,8 +78,9 @@ def _get_pipeline():
             "pip install kokoro soundfile && python -m pip install misaki[en]"
         ) from exc
 
-    device = "cuda" if _cuda_available() else "cpu"
+    device = _resolve_device()
     _pipeline = KPipeline(lang_code="a", device=device)
+    _pipeline_device = device
     log.info("Kokoro pipeline initialised on %s (voice=%s)", device, VOICE)
     return _pipeline
 

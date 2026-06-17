@@ -84,6 +84,7 @@ class PromptBuilder:
 
     def __init__(self):
         self.pattern_loader = PatternLoader()
+        self.banned_phrase_window = BANNED_PHRASE_WINDOW
         self.reload()
 
         self.current_persona: str | None = None
@@ -127,7 +128,7 @@ class PromptBuilder:
 
         # D) Banned phrases (last N turns, truncated heavily)
         recent_speech = [
-            t.speech for t in session_turns[-BANNED_PHRASE_WINDOW:]
+            t.speech for t in session_turns[-self.banned_phrase_window:]
         ]
         if recent_speech:
             # Only send first 50 chars of each to save tokens

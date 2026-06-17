@@ -21,6 +21,27 @@ from config import (
     STASH_PROXY_ENABLED,
     STASH_PROXY_ADDRESS,
     STASH_VIDEO_ENABLED,
+    VIDEO_CHANCE,
+    SMALL_MODEL,
+    GOOGLE_TIMEOUT,
+    GROQ_TIMEOUT,
+    BIG_MODEL_MAX_RETRIES,
+    BIG_MODEL_RETRY_DELAY,
+    GENERATION_OPTIONS,
+    DEFAULT_TURNS,
+    BANNED_PHRASE_WINDOW,
+    DISPLAY_INTERVAL,
+    LOW_WATERMARK,
+    HIGH_WATERMARK,
+    GENERATOR_SLEEP,
+    KOKORO_VOICE,
+    KOKORO_SPEED,
+    KOKORO_DEVICE,
+    DEFAULT_DEVICE_WS_URL,
+    COYOTE_BLE_NAME,
+    COYOTE_SOFT_LIMIT_A,
+    COYOTE_SOFT_LIMIT_B,
+    COYOTE_DEFAULT_FREQ_MS,
 )
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -35,6 +56,33 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "stash_proxy_enabled": STASH_PROXY_ENABLED,
     "stash_proxy_address": STASH_PROXY_ADDRESS,
     "stash_video_enabled": STASH_VIDEO_ENABLED,
+    "video_chance": VIDEO_CHANCE,
+    # ── Generation / model tuning ──────────────────────────────────────────
+    "small_model": SMALL_MODEL,
+    "gen_temperature": GENERATION_OPTIONS.get("temperature", 1.2),
+    "gen_top_p": GENERATION_OPTIONS.get("top_p", 0.90),
+    "gen_top_k": GENERATION_OPTIONS.get("top_k", 60),
+    "google_timeout": GOOGLE_TIMEOUT,
+    "groq_timeout": GROQ_TIMEOUT,
+    "big_model_max_retries": BIG_MODEL_MAX_RETRIES,
+    "big_model_retry_delay": BIG_MODEL_RETRY_DELAY,
+    # ── Session / pacing ───────────────────────────────────────────────────
+    "default_turns": DEFAULT_TURNS,
+    "banned_phrase_window": BANNED_PHRASE_WINDOW,
+    "display_interval": DISPLAY_INTERVAL,
+    "low_watermark": LOW_WATERMARK,
+    "high_watermark": HIGH_WATERMARK,
+    "generator_sleep": GENERATOR_SLEEP,
+    # ── Text-to-speech ─────────────────────────────────────────────────────
+    "kokoro_voice": KOKORO_VOICE,
+    "kokoro_speed": KOKORO_SPEED,
+    "kokoro_device": KOKORO_DEVICE,
+    # ── Device / hardware ──────────────────────────────────────────────────
+    "device_ws_url": DEFAULT_DEVICE_WS_URL,
+    "coyote_ble_name": COYOTE_BLE_NAME,
+    "coyote_soft_limit_a": COYOTE_SOFT_LIMIT_A,
+    "coyote_soft_limit_b": COYOTE_SOFT_LIMIT_B,
+    "coyote_freq_ms": COYOTE_DEFAULT_FREQ_MS,
     "google_validation": {
         "ok": False,
         "message": "Not validated yet",
@@ -57,6 +105,30 @@ def _as_clean_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _as_float(value: Any, fallback: float, lo: float | None = None, hi: float | None = None) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        result = float(fallback)
+    if lo is not None:
+        result = max(lo, result)
+    if hi is not None:
+        result = min(hi, result)
+    return result
+
+
+def _as_int(value: Any, fallback: int, lo: int | None = None, hi: int | None = None) -> int:
+    try:
+        result = int(float(value))
+    except (TypeError, ValueError):
+        result = int(fallback)
+    if lo is not None:
+        result = max(lo, result)
+    if hi is not None:
+        result = min(hi, result)
+    return result
+
+
 def _normalized_validation(value: Any) -> dict[str, Any]:
     default = DEFAULT_SETTINGS["google_validation"]
     if not isinstance(value, dict):
@@ -69,17 +141,51 @@ def _normalized_validation(value: Any) -> dict[str, Any]:
 
 
 def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    d = DEFAULT_SETTINGS
     settings["google_api_key"] = _as_clean_text(settings.get("google_api_key"))
     settings["groq_api_key"] = _as_clean_text(settings.get("groq_api_key"))
     settings["google_model"] = _as_clean_text(settings.get("google_model"))
     settings["groq_model"] = _as_clean_text(settings.get("groq_model"))
-    settings["tts_enabled"] = bool(settings.get("tts_enabled", DEFAULT_SETTINGS["tts_enabled"]))
+    settings["tts_enabled"] = bool(settings.get("tts_enabled", d["tts_enabled"]))
     settings["stash_url"] = _as_clean_text(settings.get("stash_url")).rstrip("/")
     settings["stash_api_key"] = _as_clean_text(settings.get("stash_api_key"))
     settings["stash_tag"] = _as_clean_text(settings.get("stash_tag"))
-    settings["stash_proxy_enabled"] = bool(settings.get("stash_proxy_enabled", DEFAULT_SETTINGS["stash_proxy_enabled"]))
+    settings["stash_proxy_enabled"] = bool(settings.get("stash_proxy_enabled", d["stash_proxy_enabled"]))
     settings["stash_proxy_address"] = _as_clean_text(settings.get("stash_proxy_address"))
-    settings["stash_video_enabled"] = bool(settings.get("stash_video_enabled", DEFAULT_SETTINGS["stash_video_enabled"]))
+    settings["stash_video_enabled"] = bool(settings.get("stash_video_enabled", d["stash_video_enabled"]))
+    settings["video_chance"] = _as_float(settings.get("video_chance"), d["video_chance"], 0.0, 1.0)
+
+    # Generation / model tuning
+    settings["small_model"] = _as_clean_text(settings.get("small_model")) or d["small_model"]
+    settings["gen_temperature"] = _as_float(settings.get("gen_temperature"), d["gen_temperature"], 0.0, 2.0)
+    settings["gen_top_p"] = _as_float(settings.get("gen_top_p"), d["gen_top_p"], 0.0, 1.0)
+    settings["gen_top_k"] = _as_int(settings.get("gen_top_k"), d["gen_top_k"], 0, 1000)
+    settings["google_timeout"] = _as_int(settings.get("google_timeout"), d["google_timeout"], 1, 3600)
+    settings["groq_timeout"] = _as_int(settings.get("groq_timeout"), d["groq_timeout"], 1, 3600)
+    settings["big_model_max_retries"] = _as_int(settings.get("big_model_max_retries"), d["big_model_max_retries"], 0, 20)
+    settings["big_model_retry_delay"] = _as_int(settings.get("big_model_retry_delay"), d["big_model_retry_delay"], 0, 600)
+
+    # Session / pacing
+    settings["default_turns"] = _as_int(settings.get("default_turns"), d["default_turns"], 1, 1000)
+    settings["banned_phrase_window"] = _as_int(settings.get("banned_phrase_window"), d["banned_phrase_window"], 0, 200)
+    settings["display_interval"] = _as_float(settings.get("display_interval"), d["display_interval"], 0.5, 600.0)
+    settings["low_watermark"] = _as_int(settings.get("low_watermark"), d["low_watermark"], 0, 1000)
+    settings["high_watermark"] = _as_int(settings.get("high_watermark"), d["high_watermark"], 1, 1000)
+    settings["generator_sleep"] = _as_float(settings.get("generator_sleep"), d["generator_sleep"], 0.1, 60.0)
+
+    # Text-to-speech
+    settings["kokoro_voice"] = _as_clean_text(settings.get("kokoro_voice")) or d["kokoro_voice"]
+    settings["kokoro_speed"] = _as_float(settings.get("kokoro_speed"), d["kokoro_speed"], 0.1, 4.0)
+    device = _as_clean_text(settings.get("kokoro_device")).lower() or d["kokoro_device"]
+    settings["kokoro_device"] = device if device in ("auto", "cpu", "cuda") else d["kokoro_device"]
+
+    # Device / hardware
+    settings["device_ws_url"] = _as_clean_text(settings.get("device_ws_url")) or d["device_ws_url"]
+    settings["coyote_ble_name"] = _as_clean_text(settings.get("coyote_ble_name")) or d["coyote_ble_name"]
+    settings["coyote_soft_limit_a"] = _as_int(settings.get("coyote_soft_limit_a"), d["coyote_soft_limit_a"], 0, 200)
+    settings["coyote_soft_limit_b"] = _as_int(settings.get("coyote_soft_limit_b"), d["coyote_soft_limit_b"], 0, 200)
+    settings["coyote_freq_ms"] = _as_int(settings.get("coyote_freq_ms"), d["coyote_freq_ms"], 10, 1000)
+
     settings["google_validation"] = _normalized_validation(settings.get("google_validation"))
     settings["groq_validation"] = _normalized_validation(settings.get("groq_validation"))
     settings["stash_validation"] = _normalized_validation(settings.get("stash_validation"))

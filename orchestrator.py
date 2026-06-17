@@ -30,7 +30,9 @@ from config import (
     DEFAULT_TURNS,
     DISPLAY_INTERVAL,
     GENERATOR_SLEEP,
+    GOOGLE_TIMEOUT,
     GROQ_MODEL_OPTIONS,
+    GROQ_TIMEOUT,
     HIGH_WATERMARK,
     LOW_WATERMARK,
     MODEL_OPTIONS,
@@ -84,24 +86,30 @@ class SessionOrchestrator:
     Producer-consumer orchestrator with watermark-based backpressure.
     """
 
-    # ── Watermark & timing settings (from config, overridable via env) ─────
+    # ── Watermark & timing settings (defaults; overridden from settings) ────
     DISPLAY_INTERVAL = DISPLAY_INTERVAL
     LOW_WATERMARK = LOW_WATERMARK
     HIGH_WATERMARK = HIGH_WATERMARK
     GENERATOR_SLEEP = GENERATOR_SLEEP
     RETRY_DELAY = BIG_MODEL_RETRY_DELAY
+    BIG_MAX_RETRIES = 3
 
     def __init__(self):
         self._settings = load_settings()
+        self._apply_tunables()
         self.tts_enabled = self._settings.get("tts_enabled", True)
         self.video_enabled = self._settings.get("stash_video_enabled", True)
         self.google_connector = GoogleAIConnector(
             api_key=self._settings.get("google_api_key", ""),
             model=self._settings.get("google_model", "gemma-4-31b-it"),
+            timeout=self._settings.get("google_timeout", GOOGLE_TIMEOUT),
+            gen_options=self._gen_options(),
         )
         self.groq_connector = GroqAIConnector(
             api_key=self._settings.get("groq_api_key", ""),
             model=self._settings.get("groq_model", "openai/gpt-oss-120b"),
+            timeout=self._settings.get("groq_timeout", GROQ_TIMEOUT),
+            gen_options=self._gen_options(),
         )
 
         default_model = self._settings.get("google_model", self.google_connector.model)
@@ -110,7 +118,9 @@ class SessionOrchestrator:
 
         self.small_connector = GoogleAIConnector(
             api_key=self._settings.get("google_api_key", ""),
-            model=SMALL_MODEL,
+            model=self.small_model,
+            timeout=self._settings.get("google_timeout", GOOGLE_TIMEOUT),
+            gen_options=self._gen_options(),
         )
 
         self.brain = Brain()
@@ -148,30 +158,71 @@ class SessionOrchestrator:
         self._video_done = threading.Event()
 
         # Session params
-        self._n_turns = DEFAULT_TURNS
+        self._n_turns = self._settings.get("default_turns", DEFAULT_TURNS)
         self._persona: str | None = None
         self._pacing: str | None = None
 
         self.device_bridge = get_bridge()
 
+        self._push_collaborator_settings()
+
     # ── Settings & lifecycle ────────────────────────────────────────────────
+
+    def _gen_options(self) -> dict:
+        """Generation hyperparameters from current settings."""
+        return {
+            "temperature": float(self._settings.get("gen_temperature", 1.2)),
+            "top_p": float(self._settings.get("gen_top_p", 0.90)),
+            "top_k": int(self._settings.get("gen_top_k", 60)),
+        }
+
+    def _apply_tunables(self) -> None:
+        """Refresh scalar tunable instance attributes from the settings dict."""
+        s = self._settings
+        self.DISPLAY_INTERVAL = float(s.get("display_interval", DISPLAY_INTERVAL))
+        self.LOW_WATERMARK = int(s.get("low_watermark", LOW_WATERMARK))
+        self.HIGH_WATERMARK = int(s.get("high_watermark", HIGH_WATERMARK))
+        self.GENERATOR_SLEEP = float(s.get("generator_sleep", GENERATOR_SLEEP))
+        self.RETRY_DELAY = int(s.get("big_model_retry_delay", BIG_MODEL_RETRY_DELAY))
+        self.BIG_MAX_RETRIES = int(s.get("big_model_max_retries", self.BIG_MAX_RETRIES))
+        self.small_model = s.get("small_model", SMALL_MODEL)
+        self.video_chance = float(s.get("video_chance", VIDEO_CHANCE))
+
+    def _push_collaborator_settings(self) -> None:
+        """Push tunables into collaborators that own their own config."""
+        s = self._settings
+        self.prompt_builder.banned_phrase_window = int(s.get("banned_phrase_window", 20))
+        tts.configure(
+            voice=s.get("kokoro_voice"),
+            speed=s.get("kokoro_speed"),
+            device=s.get("kokoro_device"),
+        )
 
     def apply_settings(self, settings: dict[str, str]) -> dict[str, str]:
         """Update live connectors and prompt assets from saved settings."""
         self._settings.update(settings)
+        self._apply_tunables()
+        self._push_collaborator_settings()
         self.tts_enabled = self._settings.get("tts_enabled", True)
         self.video_enabled = self._settings.get("stash_video_enabled", True)
+        gen = self._gen_options()
         self.google_connector.reconfigure(
             api_key=self._settings.get("google_api_key", ""),
             model=self._settings.get("google_model", self.google_connector.model),
+            timeout=self._settings.get("google_timeout", GOOGLE_TIMEOUT),
+            gen_options=gen,
         )
         self.groq_connector.reconfigure(
             api_key=self._settings.get("groq_api_key", ""),
             model=self._settings.get("groq_model", self.groq_connector.model),
+            timeout=self._settings.get("groq_timeout", GROQ_TIMEOUT),
+            gen_options=gen,
         )
         self.small_connector.reconfigure(
             api_key=self._settings.get("google_api_key", ""),
-            model=SMALL_MODEL,
+            model=self.small_model,
+            timeout=self._settings.get("google_timeout", GOOGLE_TIMEOUT),
+            gen_options=gen,
         )
 
         active_model = self.big_connector.model
@@ -375,7 +426,7 @@ class SessionOrchestrator:
                 "pending": len(self._pending),
                 "device_state": self.session.device_state.as_dict(),
                 "big_model": self.big_connector.model,
-                "small_model": SMALL_MODEL,
+                "small_model": self.small_model,
                 "persona": self._persona,
                 "pacing": self._pacing,
             }
@@ -518,7 +569,7 @@ class SessionOrchestrator:
                 device_state=self.session.device_state,
             )
 
-            raw_text = self.big_connector.send_message(user_prompt)
+            raw_text = self._send_big_with_retries(user_prompt)
             turns = self.parser.parse(raw_text)
 
             if not turns:
@@ -645,12 +696,12 @@ class SessionOrchestrator:
         """
         if not self.video_enabled:
             return
-        if VIDEO_CHANCE <= 0 or self._is_video_intent(turn):
+        if self.video_chance <= 0 or self._is_video_intent(turn):
             return
         if not self.stash.is_configured():
             return
-        if random.random() < VIDEO_CHANCE:
-            log.info("Injecting play_video interlude (chance=%.2f)", VIDEO_CHANCE)
+        if random.random() < self.video_chance:
+            log.info("Injecting play_video interlude (chance=%.2f)", self.video_chance)
             turn.intent = "play_video"
 
     def _resolve_video(self, turn: Turn) -> dict | None:
@@ -677,6 +728,33 @@ class SessionOrchestrator:
             "has_funscript": scene["has_funscript"],
             "duration_ms": scene["duration_ms"],
         }
+
+    def _send_big_with_retries(self, user_prompt: str) -> str:
+        """
+        Send a message to the big model, retrying transient failures up to
+        BIG_MAX_RETRIES times with RETRY_DELAY seconds between attempts.
+        """
+        attempts = max(1, self.BIG_MAX_RETRIES)
+        last_exc: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                return self.big_connector.send_message(user_prompt)
+            except Exception as exc:  # noqa: BLE001 - surfaced after retries exhausted
+                last_exc = exc
+                if attempt >= attempts:
+                    break
+                log.warning(
+                    "Big model attempt %d/%d failed (%s) — retrying in %ds",
+                    attempt, attempts, exc, self.RETRY_DELAY,
+                )
+                # Sleep in short slices so a stop request isn't blocked.
+                deadline = time.monotonic() + self.RETRY_DELAY
+                while time.monotonic() < deadline:
+                    with self.lock:
+                        if self.state == "idle":
+                            raise RuntimeError("Session stopped during retry") from last_exc
+                    time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
+        raise last_exc if last_exc else RuntimeError("Big model send failed")
 
     def _handle_big_failure(self, reason: str) -> None:
         with self.lock:
