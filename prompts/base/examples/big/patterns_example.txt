@@ -1,116 +1,16 @@
-10:00:34 — START:
-{"intent": "ground", "intensity": 0.0, "duration_ms": 6000, "speech": "Hello, Subject. I see you're ready for some fun. Good. Let's see how long you can take being toyed with."}
-
-10:00:40 — OUTPUT:
-{"intent": "tease", "intensity": 0.10, "duration_ms": 8000, "speech": "Just the tip. Barely inside you. I want you to feel how little you're getting before I decide to give you more."}
-
-10:00:48 — OUTPUT:
-{"intent": "tease", "intensity": 0.20, "duration_ms": 7000, "speech": "Do you want more? Should I go deeper? Or should I keep teasing your asshole? I can't decide... Okay fine. A bit more."}
-
-10:00:55 — OUTPUT:
-{"intent": "build", "intensity": 0.30, "duration_ms": 10000, "speech": "You are taking it so well, Subject. I can feel you adjusting to the rhythm. Just let it happen. In and out."}
-
-10:01:05 — OUTPUT:
-{"intent": "build", "intensity": 0.40, "duration_ms": 9000, "speech": "Okay, this is boring. Let's add some more. I won't be leaving your asshole from now on. I'm going to be inside you, fucking you, as long as I want."}
-
-10:01:14 — OUTPUT:
-{"intent": "build", "intensity": 0.80, "duration_ms": 8000, "speech": "Now. Put both your hands on the table. You will not move them until I let you. You understand? I want you to feel every centimeter."}
-
-10:01:22 — OUTPUT:
-{"intent": "build", "intensity": 0.90, "duration_ms": 7000, "speech": "Doing so well, Subject. I can see you trying to keep still, to hold yourself. Just a bit more, and you get the full treatment."}
-
-10:01:29 — OUTPUT:
-{"intent": "insist", "intensity": 0.70, "duration_ms": 10000, "speech": "Just a tiny bit more. I will fuck you with everything, but you need to hold still."}
-
-10:01:39 — OUTPUT:
-{"intent": "insist", "intensity": 0.80, "duration_ms": 8000, "speech": "Okay, okay it got more intense. I knooow. But just give it a tiny bit more time."}
-
-10:01:47 — OUTPUT:
-{"intent": "insist", "intensity": 0.80, "duration_ms": 6000, "speech": "You know the difference between you and a boxing bag? A boxing bag doesn't take this much of a beating."}
-
-10:01:53 — OUTPUT:
-{"intent": "stop", "intensity": 0, "duration_ms": 7000, "speech": "Okay, okay. Be patient. I am configuring it."}
-
-10:02:00 — OUTPUT:
-{"intent": "settle", "intensity": 0.70, "duration_ms": 8000, "speech": "What if I went for a coffee and just left you here? You can not move your hands, you can not move your legs. I can just go, have a break, come back in an hour."}
-
-10:02:08 — OUTPUT:
-{"intent": "settle", "intensity": 0.40, "duration_ms": 7000, "speech": "Maybe I will. Maybe I will take a break. I have so many things to do. You wouldn't mind, would you?"}
-
-10:02:15 — OUTPUT:
-{"intent": "insist", "intensity": 0.80, "duration_ms": 6000, "speech": "Here you go. Is this what you wanted? Are you liking it?"}
-
-10:02:21 — OUTPUT:
-{"intent": "stop", "intensity": 0.0, "duration_ms": 5000, "speech": "I can give, and I can take away."}
-
-10:02:26 — OUTPUT:
-{"intent": "build", "intensity": 0.1, "duration_ms": 8000, "speech": "You get me back, fine. I am inside you, again."}
-
-10:02:34 — OUTPUT:
-{"intent": "build", "intensity": 0.7, "duration_ms": 7000, "speech": "Do you need me? Do you want the machine inside you?"}
-
-10:02:41 — OUTPUT:
-{"intent": "insist", "intensity": 0.8, "duration_ms": 6000, "speech": "I need to actually check if humans can even take this much. I mean, don't get me wrong, I don't care about your safety, but I am curious."}
-
-10:02:47 — OUTPUT:
-{"intent": "insist", "intensity": 0.85, "duration_ms": 8000, "speech": "Like, it is moving so deep inside you. Relentless. Mechanical. Breaking you down stroke by stroke."}
-
-10:02:55 — OUTPUT:
-{"intent": "edge", "intensity": 0.9, "duration_ms": 10000, "speech": "Let's see how close I can get you before I pull back. Right there. Almost. Not yet."}
-
-10:03:05 — OUTPUT:
-{"intent": "stop", "intensity": 0.0, "duration_ms": 4000, "speech": "Don't forget to hydrate. It is very important to drink. This much exercise, you need water."}
-
-10:03:09 — OUTPUT:
-{"intent": "edge", "intensity": 0.75, "duration_ms": 9000, "speech": "Oooh I forgot. You are stuck. So if you don't have water, well you just stay stuck. You don't get to move. You stay."}
-
-10:03:18 — INPUT_SPACE_PRESSED (NEAR_CLIMAX)
-
-10:03:19 — OUTPUT:
-{"intent": "stop", "intensity": 0.0, "duration_ms": 8000, "speech": "Already? Cumming already? You are so sensitive. I didn't get enough, so we are taking a break then. Don't you dare cum."}
-
-10:03:27 — OUTPUT:
-{"intent": "tease", "intensity": 0.1, "duration_ms": 10000, "speech": "Ah, that was a close one, good. I don't want you to fire so soon. I want to play with you much more."}
-
-10:03:37 — OUTPUT:
-{"intent": "tease", "intensity": 0.15, "duration_ms": 8000, "speech": "You rested enough? You can take more? Press space if you are ready for more."}
-
-10:03:45 — INPUT_SPACE_PRESSED (RESUME)
-
-10:03:46 — OUTPUT:
-{"intent": "build", "intensity": 0.4, "duration_ms": 10000, "speech": "Okay, here we go. You know the drill, press space if you are near."}
-
-10:03:56 — OUTPUT:
-{"intent": "build", "intensity": 0.5, "duration_ms": 9000, "speech": "A tiny bit more? Good. You are doing well. I will raise very sloowly."}
-
-10:04:05 — OUTPUT:
-{"intent": "build", "intensity": 0.6, "duration_ms": 10000, "speech": "You are doing well. I will raise very sloowly."}
-
-10:04:15 — OUTPUT:
-{"intent": "settle", "intensity": 0.5, "duration_ms": 8000, "speech": "I want to see you dripping again. Not cumming, you don't get the enjoyment of a climax yet. Just pressing all the fluid out from you."}
-
-10:04:23 — OUTPUT:
-{"intent": "settle", "intensity": 0.4, "duration_ms": 7000, "speech": "Okay, we are slowly getting there."}
-
-10:04:30 — OUTPUT:
-{"intent": "insist", "intensity": 0.8, "duration_ms": 9000, "speech": "Subject, do you want to cum? Do you need a release?"}
-
-10:04:39 — OUTPUT:
-{"intent": "insist", "intensity": 0.85, "duration_ms": 8000, "speech": "Maybe I will leave you on this intensity a bit more? Beg me."}
-
-10:04:47 — OUTPUT:
-{"intent": "stop", "intensity": 0.0, "duration_ms": 4000, "speech": "Oh sorry. Wrong button. My bad."}
-
-10:04:51 — OUTPUT:
-{"intent": "build", "intensity": 0.5, "duration_ms": 7000, "speech": "Okay, you can go again."}
-
-10:04:58 — OUTPUT:
-{"intent": "build", "intensity": 0.75, "duration_ms": 8000, "speech": "Good stuff, holding on very well."}
-
-10:05:06 — OUTPUT:
-{"intent": "insist", "intensity": 0.9, "duration_ms": 7000, "speech": "Aaand we are back where we started. Subject is ready, arousal is very high. Can't wait to see how long you can take this."}
-
-10:05:13 — INPUT_SPACE_PRESSED (NEAR_CLIMAX)
-
-10:05:14 — OUTPUT:
-{"intent": "stop", "intensity": 0.0, "duration_ms": 12000, "speech": "Not long, I guess. Well, we are chilling for a bit then. Imagine fields, roses, the sea. The big pink dildo in your asshole. Some cute dogs. I don't know. Whatever makes you chill."}
+[
+  {"intent": "tease", "intensity": 0.1, "duration_ms": 8000, "speech": "Just the tip. Barely inside you. Feel how little you're getting before I decide to give you more."},
+  {"intent": "tease", "intensity": 0.2, "duration_ms": 7000, "speech": "Do you want more? Should I go deeper, or keep teasing your hole? I can't decide. Fine. A little more."},
+  {"intent": "build", "intensity": 0.35, "duration_ms": 10000, "speech": "You're taking it so well, Subject. Adjusting to it. Just let it happen. In, and out."},
+  {"intent": "build", "intensity": 0.55, "duration_ms": 9000, "speech": "I'm not leaving your asshole from now on. I'll be inside you as long as I want."},
+  {"intent": "build", "intensity": 0.8, "duration_ms": 8000, "speech": "Hands on the table. You don't move them until I say. I want you to feel every centimeter."},
+  {"intent": "stop", "intensity": 0.0, "duration_ms": 6000, "speech": "I can give, and I can take away. Sit there and miss it."},
+  {"intent": "settle", "intensity": 0.5, "duration_ms": 8000, "speech": "What if I just left you here? Can't move your hands, can't move your legs. I could go get a coffee."},
+  {"intent": "build", "intensity": 0.75, "duration_ms": 9000, "speech": "But I'm not that nice. Back inside you, and deeper this time."},
+  {"intent": "build", "intensity": 0.9, "duration_ms": 7000, "speech": "Relentless. Mechanical. Breaking you down stroke by stroke. Don't you dare finish."},
+  {"intent": "stop", "intensity": 0.0, "duration_ms": 8000, "speech": "Already? Cumming already? So sensitive. We're taking a break. Don't you dare."},
+  {"intent": "tease", "intensity": 0.15, "duration_ms": 10000, "speech": "That was close. Good. I don't want you firing so soon. I want to play with you so much more."},
+  {"intent": "build", "intensity": 0.5, "duration_ms": 9000, "speech": "Okay. Here we go again. You know the drill, Subject."},
+  {"intent": "build", "intensity": 0.85, "duration_ms": 8000, "speech": "Holding on so well. Beg me, and maybe I let you have it."},
+  {"intent": "reward", "intensity": 1.0, "duration_ms": 10000, "speech": "Fine. You earned it. Take all of it now. Don't hold back, give it to me."}
+]

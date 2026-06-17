@@ -22,7 +22,6 @@ EXAMPLES_DIR   = BASE_PROMPTS_DIR / "examples" / "big"
 PROMPT_SEEDS_DIR = BASE_PROMPTS_DIR / "seeds"
 PERSONA_MOODS_FILE = PROMPT_SEEDS_DIR / "persona_moods.txt"
 PACING_STRATEGIES_FILE = PROMPT_SEEDS_DIR / "pacing_strategies.txt"
-OPENING_PATTERNS_FILE = PROMPT_SEEDS_DIR / "opening_patterns.txt"
 
 PROMPT_TASKS_DIR = BASE_PROMPTS_DIR / "tasks"
 USER_TURN_TASK_FILE = PROMPT_TASKS_DIR / "user_turn_task.txt"
