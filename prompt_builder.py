@@ -9,6 +9,7 @@ sends fresh context: recent speech, current state, and task.
 
 import logging
 import random
+import re
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,10 @@ from response_parser import Turn
 from session_manager import DeviceState
 
 log = logging.getLogger(__name__)
+
+# Marks an optional section in a prompt template: kept when the feature is on,
+# stripped entirely (markers and content) when it is off.
+_VIDEO_BLOCK = re.compile(r"\{\{#VIDEO\}\}(.*?)\{\{/VIDEO\}\}", re.DOTALL)
 
 
 def _read_nonempty_lines(path: Path) -> list[str]:
@@ -86,12 +91,15 @@ class PromptBuilder:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def get_system_prompt(self) -> str:
+    def get_system_prompt(self, video_enabled: bool = True) -> str:
         """
         Return the full system prompt. Call this once at session start
         and pass it to connector.start_session().
+
+        When ``video_enabled`` is False the play_video intent is dropped from
+        the prompt so the AI is never offered it.
         """
-        return self._build_system_prompt()
+        return self._build_system_prompt(video_enabled)
 
     def build_user_prompt(
         self,
@@ -176,12 +184,17 @@ class PromptBuilder:
 
     # ── System prompt ─────────────────────────────────────────────────────────
 
-    def _build_system_prompt(self) -> str:
+    def _build_system_prompt(self, video_enabled: bool = True) -> str:
         pattern_block = self.pattern_loader.to_prompt_block()
         prompt = self._base_prompt
 
         if "{{PATTERNS_BLOCK}}" in prompt:
             prompt = prompt.replace("{{PATTERNS_BLOCK}}", pattern_block)
+
+        if video_enabled:
+            prompt = prompt.replace("{{#VIDEO}}", "").replace("{{/VIDEO}}", "")
+        else:
+            prompt = _VIDEO_BLOCK.sub("", prompt)
 
         return prompt
 

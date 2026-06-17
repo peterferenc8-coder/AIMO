@@ -177,10 +177,14 @@ function enqueueTyping(el, text) {
 // ── AI video clip (play_video intent) ──────────────────────────────────────
 let aiVideoFunscriptLoaded = false;
 
-async function stopAiVideo() {
+// `notifyEnded` tells the backend the clip stopped so AI device motion resumes
+// right away. Pass false for silent teardown (e.g. before loading the next clip
+// or when the whole session is stopping) so we don't release a hold prematurely.
+async function stopAiVideo(notifyEnded = false) {
   const panel = document.getElementById('ai-video-panel');
   const video = document.getElementById('ai-video');
   if (video) {
+    video.onended = null;  // avoid re-entrant end handling during teardown
     try { video.pause(); } catch (e) { /* ignore */ }
     video.removeAttribute('src');
     video.load();
@@ -189,6 +193,9 @@ async function stopAiVideo() {
   if (aiVideoFunscriptLoaded) {
     aiVideoFunscriptLoaded = false;
     try { await fetch('/api/funscript/stop', { method: 'POST' }); } catch (e) { /* ignore */ }
+  }
+  if (notifyEnded) {
+    try { await fetch('/api/video/ended', { method: 'POST' }); } catch (e) { /* ignore */ }
   }
 }
 
@@ -199,8 +206,8 @@ async function playAiVideo(info) {
   const title = document.getElementById('ai-video-title');
   if (!panel || !video) return;
 
-  // Tear down any previous clip first.
-  await stopAiVideo();
+  // Tear down any previous clip first (silently — a new clip is starting).
+  await stopAiVideo(false);
 
   if (title) title.textContent = info.title || 'Video clip';
   panel.style.display = 'block';
@@ -229,7 +236,15 @@ async function playAiVideo(info) {
   const syncPause = () => {
     if (aiVideoFunscriptLoaded) fetch('/api/funscript/pause', { method: 'POST' }).catch(() => {});
   };
+  // True once playback has reached (or been seeked to) the very end.
+  const isAtEnd = () => video.duration && video.currentTime >= video.duration - 0.3;
   const syncSeek = () => {
+    // Seeking to the end means the clip is over — end it so the AI resumes
+    // instead of waiting out the clip's original length.
+    if (isAtEnd()) {
+      stopAiVideo(true);
+      return;
+    }
     if (aiVideoFunscriptLoaded) {
       fetch('/api/funscript/seek', {
         method: 'POST',
@@ -242,7 +257,7 @@ async function playAiVideo(info) {
   video.onplay = syncStart;
   video.onpause = syncPause;
   video.onseeked = syncSeek;
-  video.onended = () => { stopAiVideo(); };
+  video.onended = () => { stopAiVideo(true); };
 
   video.src = info.video_url;
   video.currentTime = 0;
@@ -441,7 +456,10 @@ document.getElementById('ai-start').addEventListener('click', async () => {
 });
 
 const aiVideoCloseBtn = document.getElementById('ai-video-close');
-if (aiVideoCloseBtn) aiVideoCloseBtn.addEventListener('click', () => { stopAiVideo(); });
+if (aiVideoCloseBtn) aiVideoCloseBtn.addEventListener('click', () => { stopAiVideo(true); });
+
+const aiVideoSkipBtn = document.getElementById('ai-video-skip');
+if (aiVideoSkipBtn) aiVideoSkipBtn.addEventListener('click', () => { stopAiVideo(true); });
 
 document.getElementById('ai-pause').addEventListener('click', async () => {
   try {

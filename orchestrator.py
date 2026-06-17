@@ -94,6 +94,7 @@ class SessionOrchestrator:
     def __init__(self):
         self._settings = load_settings()
         self.tts_enabled = self._settings.get("tts_enabled", True)
+        self.video_enabled = self._settings.get("stash_video_enabled", True)
         self.google_connector = GoogleAIConnector(
             api_key=self._settings.get("google_api_key", ""),
             model=self._settings.get("google_model", "gemma-4-31b-it"),
@@ -123,6 +124,8 @@ class SessionOrchestrator:
             url=self._settings.get("stash_url", ""),
             api_key=self._settings.get("stash_api_key", ""),
             tag=self._settings.get("stash_tag", ""),
+            proxy_enabled=self._settings.get("stash_proxy_enabled", False),
+            proxy_address=self._settings.get("stash_proxy_address", ""),
         )
         self.state = "idle"
 
@@ -139,6 +142,11 @@ class SessionOrchestrator:
         self._big_thread: threading.Thread | None = None
         self._big_in_flight = False
 
+        # Set by the frontend when an on-screen video clip stops playing
+        # (natural end, seek-to-end, skip, or close). Releases the display
+        # hold so AI device motion resumes immediately.
+        self._video_done = threading.Event()
+
         # Session params
         self._n_turns = DEFAULT_TURNS
         self._persona: str | None = None
@@ -152,6 +160,7 @@ class SessionOrchestrator:
         """Update live connectors and prompt assets from saved settings."""
         self._settings.update(settings)
         self.tts_enabled = self._settings.get("tts_enabled", True)
+        self.video_enabled = self._settings.get("stash_video_enabled", True)
         self.google_connector.reconfigure(
             api_key=self._settings.get("google_api_key", ""),
             model=self._settings.get("google_model", self.google_connector.model),
@@ -172,6 +181,8 @@ class SessionOrchestrator:
             url=self._settings.get("stash_url", ""),
             api_key=self._settings.get("stash_api_key", ""),
             tag=self._settings.get("stash_tag", ""),
+            proxy_enabled=self._settings.get("stash_proxy_enabled", False),
+            proxy_address=self._settings.get("stash_proxy_address", ""),
         )
 
         self.prompt_builder.reload()
@@ -214,7 +225,7 @@ class SessionOrchestrator:
 
         # ── START SESSION: send system prompt once ─────────────────────────
         try:
-            system_prompt = self.brain.get_system_prompt()
+            system_prompt = self.brain.get_system_prompt(video_enabled=self.video_enabled)
             self.big_connector.start_session(system_prompt)
             log.info("Started chat session with %s", self.big_connector.model)
 
@@ -310,6 +321,18 @@ class SessionOrchestrator:
                 log.info("Session resumed")
         return self.status
 
+    def notify_video_ended(self) -> dict:
+        """
+        Signal that the on-screen video clip has stopped playing.
+
+        The display loop holds the AI while a clip plays; this releases that
+        hold immediately so the next turn's device motion resumes — instead of
+        waiting out the clip's full length (which left the device idle when the
+        user seeked to the end or skipped).
+        """
+        self._video_done.set()
+        return {"ok": True, "state": self.state}
+
     def clear(self) -> dict:
         with self.lock:
             self.state = "idle"
@@ -385,6 +408,9 @@ class SessionOrchestrator:
                     if item.video:
                         # The clip's funscript drives the device (started by the
                         # frontend); stop the current AI motion so it doesn't fight.
+                        # Arm the done-signal so we can release the hold the moment
+                        # the clip actually stops playing.
+                        self._video_done.clear()
                         self.device_bridge.apply_ai_commands({"pattern": "stop"})
                     elif item.commands:
                         get_bridge().apply_ai_commands(item.commands)
@@ -398,10 +424,12 @@ class SessionOrchestrator:
             if should_sleep:
                 time.sleep(0.5)
             elif item is not None and item.video:
-                # Hold the AI loop for the clip's real length so the next turn's
-                # device command doesn't interrupt playback mid-clip.
+                # Hold the AI loop while the clip plays so the next turn's device
+                # command doesn't interrupt playback mid-clip. Release as soon as
+                # the frontend reports the clip stopped (end, seek-to-end, skip),
+                # falling back to the clip's real length if no signal arrives.
                 hold_ms = item.video.get("duration_ms") or 0
-                self._sleep_while_running(hold_ms / 1000.0 if hold_ms else self.DISPLAY_INTERVAL)
+                self._wait_video_done(hold_ms / 1000.0 if hold_ms else self.DISPLAY_INTERVAL)
             else:
                 time.sleep(self.DISPLAY_INTERVAL)
 
@@ -413,6 +441,22 @@ class SessionOrchestrator:
                 if self.state == "idle":
                     return
             time.sleep(min(0.5, deadline - time.monotonic()))
+
+    def _wait_video_done(self, max_seconds: float) -> None:
+        """
+        Wait until the clip stops playing, the session is stopped, or
+        `max_seconds` elapses as a safety fallback — whichever comes first.
+        """
+        deadline = time.monotonic() + max(0.0, max_seconds)
+        while True:
+            with self.lock:
+                if self.state == "idle":
+                    return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            if self._video_done.wait(timeout=min(0.5, remaining)):
+                return
 
     # ── Generator loop (producer) ─────────────────────────────────────────
 
@@ -599,6 +643,8 @@ class SessionOrchestrator:
         VIDEO_CHANCE per turn. Only do this when Stash is configured (otherwise
         the turn would resolve to no clip and the device would idle).
         """
+        if not self.video_enabled:
+            return
         if VIDEO_CHANCE <= 0 or self._is_video_intent(turn):
             return
         if not self.stash.is_configured():
@@ -609,6 +655,9 @@ class SessionOrchestrator:
 
     def _resolve_video(self, turn: Turn) -> dict | None:
         """Pick a random tagged Stash scene for a play_video turn."""
+        if not self.video_enabled:
+            log.info("play_video intent but video playback is disabled — ignoring")
+            return None
         if not self.stash.is_configured():
             log.warning("play_video intent but Stash is not configured — ignoring")
             return None

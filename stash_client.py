@@ -12,13 +12,21 @@ Responsibilities:
     key never reaches the browser, and Range requests still work for seeking).
 
 Uses only the standard library so no new dependency is required.
+
+Optionally tunnels every request through a SOCKS5 proxy (configured in the
+Settings tab) — useful when the Stash server is only reachable via a proxy.
+The SOCKS5 handshake is implemented with the stdlib socket module so no extra
+dependency (e.g. PySocks) is needed.
 """
 
 from __future__ import annotations
 
+import functools
+import http.client
 import json
 import logging
 import random
+import socket
 import threading
 import urllib.error
 import urllib.request
@@ -29,21 +37,163 @@ log = logging.getLogger(__name__)
 _HTTP_TIMEOUT = 15.0
 
 
+# ── SOCKS5 proxy support (stdlib only) ─────────────────────────────────────────
+
+def parse_proxy_address(address: str) -> Optional[tuple[str, int]]:
+    """Parse a ``host:port`` proxy address into ``(host, port)`` or None."""
+    address = (address or "").strip()
+    if not address:
+        return None
+    # Tolerate an accidental scheme prefix like "socks5://".
+    if "://" in address:
+        address = address.split("://", 1)[1]
+    if ":" not in address:
+        return None
+    host, _, port = address.rpartition(":")
+    host = host.strip()
+    try:
+        port_num = int(port.strip())
+    except ValueError:
+        return None
+    if not host or not (0 < port_num < 65536):
+        return None
+    return host, port_num
+
+
+def _recv_exact(sock: socket.socket, count: int) -> bytes:
+    chunks: list[bytes] = []
+    remaining = count
+    while remaining > 0:
+        chunk = sock.recv(remaining)
+        if not chunk:
+            raise OSError("SOCKS5 proxy closed the connection unexpectedly")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _socks5_connect(proxy: tuple[str, int], dest_host: str, dest_port: int,
+                    timeout: float | None) -> socket.socket:
+    """Open a TCP socket to ``dest`` tunnelled through a SOCKS5 proxy (no auth)."""
+    sock = socket.create_connection(proxy, timeout=timeout)
+    try:
+        # Greeting: version 5, one method, "no authentication required" (0x00).
+        sock.sendall(b"\x05\x01\x00")
+        ver, method = _recv_exact(sock, 2)
+        if ver != 0x05:
+            raise OSError("SOCKS5 proxy returned an unexpected version")
+        if method != 0x00:
+            raise OSError("SOCKS5 proxy requires authentication (unsupported)")
+
+        # CONNECT request using a domain-name address so the proxy resolves DNS.
+        host_bytes = dest_host.encode("idna")
+        if len(host_bytes) > 255:
+            raise OSError("Destination host name is too long for SOCKS5")
+        request = (
+            b"\x05\x01\x00\x03"
+            + bytes([len(host_bytes)])
+            + host_bytes
+            + int(dest_port).to_bytes(2, "big")
+        )
+        sock.sendall(request)
+
+        ver, rep, _rsv, atyp = _recv_exact(sock, 4)
+        if rep != 0x00:
+            raise OSError(f"SOCKS5 proxy refused the connection (code {rep})")
+        # Drain the bound address + port from the reply so the stream is clean.
+        if atyp == 0x01:      # IPv4
+            _recv_exact(sock, 4)
+        elif atyp == 0x03:    # domain name
+            length = _recv_exact(sock, 1)[0]
+            _recv_exact(sock, length)
+        elif atyp == 0x04:    # IPv6
+            _recv_exact(sock, 16)
+        else:
+            raise OSError("SOCKS5 proxy returned an unknown address type")
+        _recv_exact(sock, 2)  # bound port
+        return sock
+    except Exception:
+        sock.close()
+        raise
+
+
+class _Socks5HTTPConnection(http.client.HTTPConnection):
+    def __init__(self, *args, _proxy: tuple[str, int], **kwargs):
+        super().__init__(*args, **kwargs)
+        self._proxy = _proxy
+
+    def connect(self) -> None:
+        self.sock = _socks5_connect(self._proxy, self.host, self.port, self.timeout)
+        if self._tunnel_host:
+            self._tunnel()
+
+
+class _Socks5HTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, *args, _proxy: tuple[str, int], **kwargs):
+        super().__init__(*args, **kwargs)
+        self._proxy = _proxy
+
+    def connect(self) -> None:
+        sock = _socks5_connect(self._proxy, self.host, self.port, self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+class _Socks5HTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, proxy: tuple[str, int]):
+        super().__init__()
+        self._proxy = proxy
+
+    def http_open(self, req):
+        return self.do_open(
+            functools.partial(_Socks5HTTPConnection, _proxy=self._proxy), req
+        )
+
+
+class _Socks5HTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, proxy: tuple[str, int]):
+        super().__init__()
+        self._proxy = proxy
+
+    def https_open(self, req):
+        return self.do_open(
+            functools.partial(_Socks5HTTPSConnection, _proxy=self._proxy), req
+        )
+
+
+def _build_opener(proxy: Optional[tuple[str, int]]) -> urllib.request.OpenerDirector:
+    """Build a urllib opener that tunnels through ``proxy`` when set."""
+    if proxy is None:
+        return urllib.request.build_opener()
+    return urllib.request.build_opener(
+        _Socks5HTTPHandler(proxy), _Socks5HTTPSHandler(proxy)
+    )
+
+
 class StashClient:
     """GraphQL + media accessor for a single Stash server."""
 
-    def __init__(self, url: str = "", api_key: str = "", tag: str = ""):
+    def __init__(self, url: str = "", api_key: str = "", tag: str = "",
+                 proxy_enabled: bool = False, proxy_address: str = ""):
         self._lock = threading.Lock()
         self._scenes: list[dict] = []
-        self.configure(url, api_key, tag)
+        self._opener = _build_opener(None)
+        self.configure(url, api_key, tag, proxy_enabled, proxy_address)
 
     # ── Configuration ────────────────────────────────────────────────────────
 
-    def configure(self, url: str = "", api_key: str = "", tag: str = "") -> None:
+    def configure(self, url: str = "", api_key: str = "", tag: str = "",
+                  proxy_enabled: bool = False, proxy_address: str = "") -> None:
         with self._lock:
             self.url = (url or "").rstrip("/")
             self.api_key = api_key or ""
             self.tag = (tag or "").strip()
+            self.proxy_enabled = bool(proxy_enabled)
+            self.proxy_address = (proxy_address or "").strip()
+            proxy = parse_proxy_address(self.proxy_address) if self.proxy_enabled else None
+            if self.proxy_enabled and proxy is None:
+                log.warning("Stash: proxy enabled but address %r is invalid; "
+                            "connecting directly", self.proxy_address)
+            self._opener = _build_opener(proxy)
             self._scenes = []  # invalidate cache on any config change
 
     def is_configured(self) -> bool:
@@ -69,7 +219,7 @@ class StashClient:
             headers=self._headers(),
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
+        with self._opener.open(req, timeout=_HTTP_TIMEOUT) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
         if payload.get("errors"):
             raise RuntimeError(f"Stash GraphQL error: {payload['errors']}")
@@ -179,7 +329,7 @@ class StashClient:
             headers=self._headers(),
             method="GET",
         )
-        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
+        with self._opener.open(req, timeout=_HTTP_TIMEOUT) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
     def open_stream(self, scene_id: str, range_header: Optional[str] = None):
@@ -200,10 +350,10 @@ class StashClient:
             headers=headers,
             method="GET",
         )
-        # urlopen returns the response for 2xx (including 206 Partial Content);
+        # open() returns the response for 2xx (including 206 Partial Content);
         # HTTPError (also a response object) is raised for >=400.
         try:
-            return urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT)
+            return self._opener.open(req, timeout=_HTTP_TIMEOUT)
         except urllib.error.HTTPError as exc:
             return exc
 

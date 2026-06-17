@@ -105,6 +105,14 @@ function applyStashState(data) {
   const tagField = $settings('settings-stash-tag');
   if (tagField) tagField.value = data.stash_tag || '';
 
+  const videoEnabledField = $settings('settings-stash-video-enabled');
+  if (videoEnabledField) videoEnabledField.checked = Boolean(data.stash_video_enabled);
+
+  const proxyEnabledField = $settings('settings-stash-proxy-enabled');
+  if (proxyEnabledField) proxyEnabledField.checked = Boolean(data.stash_proxy_enabled);
+  const proxyAddressField = $settings('settings-stash-proxy-address');
+  if (proxyAddressField) proxyAddressField.value = data.stash_proxy_address || '';
+
   const keyField = $settings('settings-stash-key');
   if (keyField) keyField.value = '';
   const keyStatus = $settings('settings-stash-status');
@@ -193,10 +201,16 @@ async function updateStashSettings() {
   const urlField = $settings('settings-stash-url');
   const keyField = $settings('settings-stash-key');
   const tagField = $settings('settings-stash-tag');
+  const videoEnabledField = $settings('settings-stash-video-enabled');
+  const proxyEnabledField = $settings('settings-stash-proxy-enabled');
+  const proxyAddressField = $settings('settings-stash-proxy-address');
 
   const payload = {
     stash_url: urlField ? urlField.value.trim() : '',
     stash_tag: tagField ? tagField.value.trim() : '',
+    stash_video_enabled: videoEnabledField ? videoEnabledField.checked : false,
+    stash_proxy_enabled: proxyEnabledField ? proxyEnabledField.checked : false,
+    stash_proxy_address: proxyAddressField ? proxyAddressField.value.trim() : '',
   };
   // Only send the key when the user typed one (blank keeps the saved key).
   if (keyField && keyField.value.trim()) {
@@ -218,6 +232,9 @@ async function updateStashSettings() {
   applyStashState({
     stash_url: data.saved?.stash_url,
     stash_tag: data.saved?.stash_tag,
+    stash_video_enabled: data.saved?.stash_video_enabled,
+    stash_proxy_enabled: data.saved?.stash_proxy_enabled,
+    stash_proxy_address: data.saved?.stash_proxy_address,
     stash_api_key_masked: data.saved?.stash_api_key_masked,
     stash_validation: data.stash_validation,
   });

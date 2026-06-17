@@ -42,9 +42,9 @@ class Brain:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def get_system_prompt(self) -> str:
+    def get_system_prompt(self, video_enabled: bool = True) -> str:
         """Return the full system prompt. Call once at session start."""
-        return self._prompt_builder.get_system_prompt()
+        return self._prompt_builder.get_system_prompt(video_enabled=video_enabled)
 
     def build_seed_prompt(
         self,
