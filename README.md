@@ -92,6 +92,11 @@ validates, its models unlock on the **AI Session** tab.
 > quarantine flag with `xattr -d com.apple.quarantine AIMO-macos-arm64` (or right-click
 > → Open). On Windows, choose **More info → Run anyway** on the SmartScreen prompt.
 
+> **No text-to-speech in the binary.** Local TTS (Kokoro) depends on PyTorch, which is
+> too large to bundle, so it is **not** included in the prebuilt binaries. Everything
+> else works; TTS simply reports as unavailable. To use TTS, run from source and install
+> the extras (see [Quick start (from source)](#quick-start-from-source)).
+
 ---
 
 ## Quick start (from source)
@@ -103,9 +108,19 @@ python main.py
 
 Open <http://localhost:5000> (set `AIMEE_OPEN_BROWSER=1` to auto-open it as the binary does).
 
-`requirements.txt` covers the core (Flask, `google-genai`, `websockets`, `pyserial`)
-plus the local TTS (Kokoro) and Coyote BLE extras. Running from source, all runtime
-data stays in the repo working tree exactly as before.
+`requirements.txt` covers the core (Flask, `google-genai`, `websockets`, `pyserial`) plus
+Coyote BLE support. Running from source, all runtime data stays in the repo working tree
+exactly as before.
+
+**To enable local text-to-speech** (Kokoro + PyTorch — large, source-only):
+
+```bash
+pip install -r requirements-tts.txt
+```
+
+Optionally install a smaller CPU-only PyTorch first with
+`pip install torch --index-url https://download.pytorch.org/whl/cpu`. Kokoro downloads its
+voice model from Hugging Face on first synthesis, so initial TTS needs an internet connection.
 
 To set up an AI back end, open the **Settings** tab, paste a Google and/or Groq API key,
 **Save All**, then press **Test Connection**. Once a key validates, its models unlock for
@@ -137,10 +152,10 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-> **Binary size & first start.** Bundling Kokoro pulls in PyTorch, so the executable is
-> large (hundreds of MB) and a one-file build takes a few seconds to unpack on first run.
-> Kokoro also downloads its voice model from Hugging Face on first synthesis, so initial
-> TTS needs an internet connection.
+> **What's bundled.** The TTS stack (Kokoro/PyTorch) is deliberately excluded
+> ([`requirements-tts.txt`](requirements-tts.txt)), keeping the binary small. The build
+> only installs [`requirements.txt`](requirements.txt), so even if Kokoro is present in
+> your environment it is not pulled into the executable.
 
 ---
 
@@ -510,15 +525,19 @@ API keys are never committed to source — they live only in the local settings 
 
 ## Dependencies
 
-`requirements.txt` (and the prebuilt binaries) include:
+`requirements.txt` (bundled into the prebuilt binaries):
 
 - **Core** — `Flask`, `google-genai`, `websockets`, `pyserial`.
-- **Local TTS (Kokoro)** — `kokoro`, `misaki[en]`, `soundfile`, `numpy`.
 - **Coyote BLE** — `bleak`.
 
-All of these are still **lazy-loaded**: the app starts and runs even if an optional
-package is missing, and a feature that needs one surfaces a clear error only when first
-used. A few extras are not bundled and remain install-as-needed:
+`requirements-tts.txt` (**source-only**, not bundled — too large because of PyTorch):
+
+- **Local TTS (Kokoro)** — `kokoro`, `misaki[en]`, `soundfile`, `numpy`.
+
+Everything is **lazy-loaded**: the app starts and runs even if an optional package is
+missing, and a feature that needs one surfaces a clear error only when first used (TTS, for
+instance, reports as unavailable in the prebuilt binary). A few more extras remain
+install-as-needed:
 
 - **Groq** — none beyond the stdlib (uses `urllib`).
 - **Heart-rate sensor** — `pynput` (for the standalone heart-rate experiment).

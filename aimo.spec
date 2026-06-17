@@ -37,14 +37,9 @@ binaries = []
 hiddenimports = []
 
 # ── Pull in packages with data files / dynamic imports PyInstaller can miss ───
-# kokoro/misaki/torch ship data files and import submodules lazily; google.genai
-# carries bundled schema data. collect_all grabs datas + binaries + submodules.
+# google.genai carries bundled schema data; bleak loads backend submodules
+# dynamically. collect_all grabs datas + binaries + submodules.
 for pkg in (
-    "kokoro",
-    "misaki",
-    "torch",
-    "soundfile",
-    "numpy",
     "bleak",
     "google.genai",
 ):
@@ -60,6 +55,13 @@ for pkg in (
 # pyserial / websockets are imported by string in places; name them explicitly.
 hiddenimports += ["serial", "serial.tools.list_ports", "websockets"]
 
+# Text-to-speech (Kokoro + PyTorch) is intentionally NOT bundled — it is far too
+# large to ship and is provided as a source-only extra (see requirements-tts.txt).
+# Exclude the whole stack so it is never pulled in, even if it happens to be
+# installed in the build environment. tts.py imports these lazily, so the app
+# still runs; TTS just reports that it is unavailable until installed from source.
+TTS_EXCLUDES = ["torch", "kokoro", "misaki", "soundfile", "numpy", "scipy"]
+
 
 block_cipher = None
 
@@ -72,7 +74,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter"],
+    excludes=["tkinter"] + TTS_EXCLUDES,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

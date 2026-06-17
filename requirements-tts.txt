@@ -1,0 +1,15 @@
+# Optional text-to-speech extras (Kokoro).
+#
+# These are NOT bundled in the prebuilt binaries because Kokoro pulls in PyTorch,
+# which is too large to ship. To enable local TTS, run AIMO from source and:
+#
+#     pip install -r requirements.txt
+#     pip install -r requirements-tts.txt
+#
+# By default this installs the standard PyTorch build (CUDA where available). For
+# a smaller, CPU-only PyTorch, install it first:
+#     pip install torch --index-url https://download.pytorch.org/whl/cpu
+kokoro
+misaki[en]
+soundfile
+numpy

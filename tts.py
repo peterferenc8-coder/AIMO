@@ -20,7 +20,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import numpy as np
+# numpy / soundfile / kokoro are imported lazily inside synthesize() so the
+# module (and its cache/config helpers) import cleanly in builds that ship
+# without the optional TTS dependencies.  See requirements-tts.txt.
 
 log = logging.getLogger(__name__)
 
@@ -74,8 +76,9 @@ def _get_pipeline():
         from kokoro import KPipeline
     except ImportError as exc:
         raise RuntimeError(
-            "kokoro is not installed. Install it with: "
-            "pip install kokoro soundfile && python -m pip install misaki[en]"
+            "Text-to-speech is not installed. It is not bundled in the prebuilt "
+            "binary; run from source and install the TTS extras with: "
+            "pip install -r requirements-tts.txt"
         ) from exc
 
     device = _resolve_device()
@@ -140,6 +143,8 @@ def synthesize(text: str, voice: str | None = None, speed: float | None = None) 
     if not audio_chunks:
         log.warning("Kokoro produced no audio for: %s", text[:80])
         return {"audio_url": None, "audio_path": None, "words": [], "duration_ms": 0}
+
+    import numpy as np
 
     audio = np.concatenate(audio_chunks)
 
