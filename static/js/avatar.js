@@ -102,10 +102,34 @@ class Avatar {
   /** Frame the head and shoulders — this is a talking portrait, not a body shot. */
   _frameHead() {
     if (!this.bones.head) return;
-    const head = new THREE.Vector3();
-    this.bones.head.getWorldPosition(head);
-    this.camera.position.set(head.x, head.y - 0.03, head.z + 0.62);
-    this.camera.lookAt(head.x, head.y - 0.03, head.z);
+    this._headPos = new THREE.Vector3();
+    this.bones.head.getWorldPosition(this._headPos);
+    this._applyFraming();
+  }
+
+  /**
+   * Pull the camera back far enough that the subject fits both dimensions.
+   *
+   * The panel's shape is not fixed — it is 2 of 6 grid columns, so it is tall
+   * and narrow on a wide screen. A fixed distance framed for a short, wide
+   * panel turns into an extreme close-up once the aspect goes portrait, since
+   * horizontal FOV shrinks with it. Solving for whichever axis is tighter
+   * keeps the head and shoulders in shot at any shape.
+   */
+  _applyFraming() {
+    if (!this._headPos || !this.camera) return;
+    const SUBJECT_W = 0.36;   // metres of subject to keep visible across
+    const SUBJECT_H = 0.44;   // ...and down
+    const vFov = THREE.MathUtils.degToRad(this.camera.fov);
+    const aspect = this.camera.aspect || 1;
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+    const dist = Math.max(
+      (SUBJECT_H / 2) / Math.tan(vFov / 2),
+      (SUBJECT_W / 2) / Math.tan(hFov / 2),
+    );
+    const y = this._headPos.y - 0.05;
+    this.camera.position.set(this._headPos.x, y, this._headPos.z + dist);
+    this.camera.lookAt(this._headPos.x, y, this._headPos.z);
   }
 
   /**
@@ -126,6 +150,7 @@ class Avatar {
     this.renderer.setSize(w, h, false); // false: CSS owns the display size
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this._applyFraming();               // re-fit: the panel's shape drives this
     return true;
   }
 

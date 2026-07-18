@@ -391,12 +391,54 @@ input[type="range"] {
 }
 
 /* ── AI Tab ── */
+/* Six equal columns: controls 1, transcript 3, avatar 2. While a clip plays
+   the transcript and avatar give way and the video spans all 5 of their
+   columns — see .ai-layout.video-mode below. */
 .ai-layout {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: repeat(6, 1fr);
   gap: 0;
   height: 100%;
   overflow: hidden;
+}
+/* min-width:0 everywhere: grid items default to min-content and long
+   transcript lines would otherwise blow the column widths out. */
+.ai-sidebar   { grid-column: span 1; min-width: 0; }
+.ai-stream    { grid-column: span 3; min-width: 0; }
+#ai-avatar-panel { grid-column: span 2; }
+
+/* Video sits in the same row, occupying everything but the sidebar. Hidden
+   until a clip plays — toggled by a class rather than an inline style so it
+   cannot fight the grid's own display value. */
+#ai-video-panel {
+  grid-column: 2 / -1;
+  grid-row: 1;
+  display: none;
+  flex-direction: column;
+  min-width: 0;
+  background: #0a0a0a;
+  padding: 8px;
+}
+.ai-layout.video-mode .ai-stream,
+.ai-layout.video-mode #ai-avatar-panel { display: none; }
+.ai-layout.video-mode #ai-video-panel { display: flex; }
+
+#ai-video-panel .video-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  flex-shrink: 0;
+}
+#ai-video-panel #ai-video-title { color: #00ffcc; font-size: 13px; }
+#ai-video-panel .video-actions { display: flex; align-items: center; gap: 6px; }
+#ai-video {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  display: block;
+  background: #000;
+  border-radius: 4px;
 }
 .ai-sidebar {
   padding: 16px;
@@ -696,11 +738,12 @@ input[type="range"] {
 /* Speaking avatar — sits between the stream header and the turn list, the
    same way the video panel does, so .stream-body's flex:1 absorbs the rest. */
 #ai-avatar-panel {
-  flex-shrink: 0;
-  height: 300px;
+  height: 100%;
+  min-width: 0;
   background: radial-gradient(ellipse at 50% 35%, #1b1f2a 0%, #0a0b0f 70%);
-  border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--border);
   position: relative;
+  overflow: hidden;
 }
 #ai-avatar-stage {
   width: 100%;
