@@ -43,6 +43,8 @@ const SETTING_HELP = {
   coyote_soft_limit_a: 'Maximum allowed strength for Coyote channel A (safety cap).',
   coyote_soft_limit_b: 'Maximum allowed strength for Coyote channel B (safety cap).',
   coyote_freq_ms: 'Coyote pulse frequency in milliseconds.',
+  buttplug_ws_url: 'WebSocket address of Intiface Central. Start Intiface and enable its server before connecting.',
+  buttplug_vibe_floor: 'Minimum vibration for a non-zero stroke position. Motors need 50-100ms to spin up, so fast patterns can feel indistinct at 0; raise this to ~0.15 to keep pulses crisp.',
 };
 
 function injectHelpIcons() {

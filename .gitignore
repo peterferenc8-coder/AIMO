@@ -8,3 +8,5 @@ logs/
 build/
 dist/
 out/
+
+static/models/*

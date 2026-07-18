@@ -51,6 +51,7 @@ PLAIN_SETTING_KEYS = (
     "kokoro_voice", "kokoro_speed", "kokoro_device",
     "device_ws_url", "coyote_ble_name",
     "coyote_soft_limit_a", "coyote_soft_limit_b", "coyote_freq_ms",
+    "buttplug_ws_url", "buttplug_vibe_floor",
 )
 SECRET_SETTING_KEYS = ("google_api_key", "groq_api_key", "stash_api_key")
 
@@ -267,6 +268,20 @@ def _push_coyote_settings(settings: dict) -> None:
         log.warning("Failed to push Coyote settings to device: %s", exc)
 
 
+def _push_buttplug_settings(settings: dict) -> None:
+    """Live-apply the vibration floor to a connected Buttplug device."""
+    dev = get_active_device()
+    if not dev or getattr(dev, "device_type", "") != "buttplug":
+        return
+    try:
+        dev.send_command({
+            "cmd": "set_vibe_floor",
+            "value": float(settings.get("buttplug_vibe_floor", 0.0)),
+        })
+    except Exception as exc:
+        log.warning("Failed to push Buttplug settings to device: %s", exc)
+
+
 def _validation_from_settings(settings: dict, key: str) -> dict:
     value = settings.get(key)
     if isinstance(value, dict):
@@ -425,6 +440,7 @@ def register_routes(app: Flask) -> None:
 
         # Live-push Coyote safety limits/frequency to a connected Coyote device.
         _push_coyote_settings(saved)
+        _push_buttplug_settings(saved)
 
         return jsonify(
             {
@@ -718,6 +734,41 @@ def register_routes(app: Flask) -> None:
 
         dev.send_command(body)
         return jsonify({"ok": True, "state": dev.latest_state})
+
+    # ── Buttplug / Intiface ───────────────────────────────────────────────────
+
+    def _active_buttplug():
+        """Return the active Buttplug device, or (None, error_response)."""
+        dev = get_active_device()
+        if not dev or dev.device_type != "buttplug":
+            return None, (jsonify({"ok": False, "error": "Buttplug not active"}), 400)
+        return dev, None
+
+    @app.get("/api/device/buttplug/devices")
+    def api_buttplug_devices():
+        dev, err = _active_buttplug()
+        if err:
+            return err
+        return jsonify({
+            "ok": True,
+            "connected": dev.get_state().connected,
+            "devices": dev.list_devices(),
+        })
+
+    @app.post("/api/device/buttplug/select")
+    def api_buttplug_select():
+        """Choose which discovered toys to drive. Empty list means all of them."""
+        dev, err = _active_buttplug()
+        if err:
+            return err
+        body = request.get_json(silent=True) or {}
+        indices = body.get("indices") or []
+        try:
+            indices = [int(i) for i in indices]
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "indices must be integers"}), 400
+        dev.send_command({"cmd": "select_devices", "indices": indices})
+        return jsonify({"ok": True, "devices": dev.list_devices()})
 
     # ── TTS Routes ──────────────────────────────────────────────────────────
 

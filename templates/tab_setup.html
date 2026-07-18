@@ -7,6 +7,7 @@
       <select id="device-type-select">
         <option value="ossm">OSSM (Linear Actuator)</option>
         <option value="coyote">DG-Lab Coyote 3.0 (E-Stim BLE)</option>
+        <option value="buttplug">Buttplug / Intiface</option>
       </select>
       <button class="btn" id="device-type-set">Set Device</button>
       <span id="device-type-status" class="conn-status">OSSM</span>
@@ -90,6 +91,33 @@
       <div class="coyote-info">
         <p>Connect to DG-Lab Coyote 3.0 via direct Bluetooth LE.</p>
         <p>Ensure the device is powered on and not connected to another app.</p>
+      </div>
+    </div>
+
+    <!-- Buttplug / Intiface Connection -->
+    <div id="setup-buttplug-panel" class="device-panel" style="display:none;">
+      <div class="connection-bar">
+        <label for="buttplug-ws-url">Intiface URL</label>
+        <input type="text" id="buttplug-ws-url" placeholder="ws://127.0.0.1:12345" />
+        <button class="btn" id="buttplug-connect">Connect</button>
+        <span id="buttplug-conn-status" class="conn-status">Offline</span>
+        <span id="buttplug-dot" class="dot"></span>
+      </div>
+
+      <div class="connection-bar">
+        <label>Toys</label>
+        <span id="buttplug-device-count" class="conn-status">Not connected</span>
+      </div>
+
+      <!-- Intiface does its own scanning, so this list is pushed over the device
+           stream as toys come and go. Unchecked toys are left alone, so a
+           vibrator can be driven while a stroker sits idle. -->
+      <div id="buttplug-device-list" class="buttplug-devices"></div>
+
+      <div class="device-info">
+        <p>Start Intiface Central and enable its server, then connect here.</p>
+        <p>Strokers follow the stroke position directly. Vibrators map that same
+           position onto vibration strength, so a stroke pattern becomes a pulse.</p>
       </div>
     </div>
 

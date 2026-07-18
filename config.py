@@ -166,3 +166,12 @@ COYOTE_BLE_NAME = os.getenv("COYOTE_BLE_NAME", "47L121000")
 COYOTE_SOFT_LIMIT_A = int(os.getenv("COYOTE_SOFT_LIMIT_A", "100"))
 COYOTE_SOFT_LIMIT_B = int(os.getenv("COYOTE_SOFT_LIMIT_B", "100"))
 COYOTE_DEFAULT_FREQ_MS = int(os.getenv("COYOTE_DEFAULT_FREQ_MS", "100"))
+
+# ── Buttplug / Intiface ──────────────────────────────────────────────────────
+# Intiface Central's default WebSocket server address.
+BUTTPLUG_WS_URL = os.getenv("BUTTPLUG_WS_URL", "ws://127.0.0.1:12345")
+# Minimum vibration for a non-zero stroke position. Motors take 50-100ms to spin
+# up, so a full 0->1->0 sweep at speed never quite reaches either end and turns
+# to mush; raising the floor keeps fast pulses distinct at the cost of never
+# fully stopping between strokes.
+BUTTPLUG_VIBE_FLOOR = float(os.getenv("BUTTPLUG_VIBE_FLOOR", "0.0"))
