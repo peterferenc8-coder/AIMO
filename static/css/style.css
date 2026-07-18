@@ -397,6 +397,10 @@ input[type="range"] {
 .ai-layout {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
+  /* minmax(0, 1fr), not the default `auto`: an auto row sizes to its tallest
+     content, so a big clip stretches the row past the viewport instead of
+     being scaled down into it. */
+  grid-template-rows: minmax(0, 1fr);
   gap: 0;
   height: 100%;
   overflow: hidden;
@@ -416,6 +420,8 @@ input[type="range"] {
   display: none;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;      /* flex/grid items floor at min-content without this */
+  overflow: hidden;
   background: #0a0a0a;
   padding: 8px;
 }
@@ -432,10 +438,16 @@ input[type="range"] {
 }
 #ai-video-panel #ai-video-title { color: #00ffcc; font-size: 13px; }
 #ai-video-panel .video-actions { display: flex; align-items: center; gap: 6px; }
+/* Scale the clip to fit the panel rather than letting its native resolution
+   set the size: a 4K clip must shrink into the panel, not overflow it.
+   object-fit keeps the aspect ratio and letterboxes whatever is left over. */
 #ai-video {
-  flex: 1;
+  flex: 1 1 0;
   width: 100%;
+  height: 100%;
+  min-width: 0;
   min-height: 0;
+  object-fit: contain;
   display: block;
   background: #000;
   border-radius: 4px;
