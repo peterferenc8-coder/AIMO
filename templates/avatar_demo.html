@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Avatar Demo — AIMO</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #0e0f13; color: #e8e8ea;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #stage { position: fixed; inset: 0; }
+    canvas { display: block; }
+
+    #panel {
+      position: fixed; top: 16px; left: 16px; z-index: 10;
+      background: rgba(20,22,28,0.82); backdrop-filter: blur(8px);
+      border: 1px solid #2a2d36; border-radius: 12px; padding: 16px 18px;
+      width: 280px; box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+    }
+    #panel h1 { font-size: 15px; margin: 0 0 4px; font-weight: 600; }
+    #panel .sub { font-size: 12px; color: #9aa0ab; margin: 0 0 14px; }
+    .row { margin: 12px 0; }
+    .row label { display: flex; justify-content: space-between; font-size: 12px;
+      color: #b8bdc7; margin-bottom: 6px; }
+    .row label b { color: #e8e8ea; font-variant-numeric: tabular-nums; }
+    input[type=range] { width: 100%; accent-color: #7c8cff; }
+    .toggle { display: flex; align-items: center; gap: 8px; font-size: 13px;
+      cursor: pointer; user-select: none; margin: 8px 0; }
+    .toggle input { accent-color: #7c8cff; width: 16px; height: 16px; }
+    #status { font-size: 12px; color: #7c8cff; margin-top: 10px; min-height: 16px; }
+    .divider { height: 1px; background: #2a2d36; margin: 14px 0; }
+    .hint { font-size: 11px; color: #6b7280; line-height: 1.5; margin-top: 6px; }
+    select { width: 100%; background: #14161c; color: #e8e8ea; border: 1px solid #2a2d36;
+      border-radius: 8px; padding: 6px; font-size: 12px; }
+
+    #tuning {
+      position: fixed; top: 16px; right: 16px; z-index: 10;
+      background: rgba(20,22,28,0.82); backdrop-filter: blur(8px);
+      border: 1px solid #2a2d36; border-radius: 12px; padding: 14px 16px;
+      width: 240px; max-height: calc(100vh - 32px); overflow-y: auto;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+    }
+    #tuning h1 { font-size: 14px; margin: 0 0 4px; font-weight: 600; }
+    #tuning .sub { font-size: 11px; color: #9aa0ab; margin: 0 0 10px; }
+    #tuning .row { margin: 8px 0; }
+    #tuning label { display: flex; justify-content: space-between; font-size: 11px;
+      color: #b8bdc7; margin-bottom: 3px; }
+    #tuning label b { color: #7c8cff; font-variant-numeric: tabular-nums; }
+    #tuning input[type=range] { width: 100%; accent-color: #8a6cff; }
+    #log-btn { width: 100%; margin-top: 10px; padding: 8px; font-size: 12px; cursor: pointer;
+      background: #7c8cff; color: #0e0f13; border: none; border-radius: 8px; font-weight: 600; }
+    #log-btn:hover { background: #93a0ff; }
+
+    #pose {
+      position: fixed; bottom: 16px; left: 16px; z-index: 10;
+      background: rgba(20,22,28,0.82); backdrop-filter: blur(8px);
+      border: 1px solid #2a2d36; border-radius: 12px; padding: 14px 16px;
+      width: 280px; box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+    }
+    #pose .toggle { font-size: 12px; color: #b8bdc7; align-items: flex-start; }
+    #pose .toggle b { color: #e8e8ea; }
+    .pose-btn { width: 100%; margin-top: 8px; padding: 7px; font-size: 12px; cursor: pointer;
+      background: #2a2d36; color: #e8e8ea; border: 1px solid #3a3d46; border-radius: 8px; }
+    .pose-btn:hover { background: #343845; }
+  </style>
+</head>
+<body>
+  <div id="stage"></div>
+
+  <div id="panel">
+    <h1>Avatar Demo</h1>
+    <p class="sub">VRM idle-life proof of concept</p>
+
+    <label class="toggle"><input type="checkbox" id="chk-blink" checked> Blinking</label>
+    <label class="toggle"><input type="checkbox" id="chk-breathe" checked> Breathing</label>
+    <label class="toggle"><input type="checkbox" id="chk-look" checked> Looking around</label>
+    <label class="toggle"><input type="checkbox" id="chk-sway" checked> Idle body sway</label>
+
+    <div class="divider"></div>
+
+    <div class="row">
+      <label>Expression <b id="expr-name">neutral</b></label>
+      <select id="sel-expr">
+        <option value="neutral">neutral</option>
+        <option value="happy">happy</option>
+        <option value="angry">angry</option>
+        <option value="sad">sad</option>
+        <option value="relaxed">relaxed</option>
+        <option value="surprised">surprised</option>
+      </select>
+    </div>
+
+    <div class="divider"></div>
+
+    <label class="toggle"><input type="checkbox" id="chk-rhythm"> Rhythm hand motion</label>
+    <div class="row">
+      <label>Speed (bpm) <b id="bpm-val">60</b></label>
+      <input type="range" id="rng-bpm" min="20" max="180" value="60">
+    </div>
+    <div class="row">
+      <label>Manual position <b id="pos-val">–</b></label>
+      <input type="range" id="rng-pos" min="0" max="100" value="0">
+    </div>
+    <p class="hint">This previews how a funscript <code>pos</code> (0–100)
+      maps to the arm. Enable "Rhythm" for an auto sine, or drag "Manual position".</p>
+
+    <div id="status">loading…</div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "{{ url_for('static', filename='vendor/three/three.module.js') }}",
+      "three/addons/": "{{ url_for('static', filename='vendor/three/addons/') }}",
+      "@pixiv/three-vrm": "{{ url_for('static', filename='vendor/three-vrm/three-vrm.module.js') }}"
+    }
+  }
+  </script>
+  <script type="module"
+          data-model-url="{{ url_for('static', filename='models/avatar.glb') }}"
+          src="{{ url_for('static', filename='js/avatar_demo.js') }}"></script>
+</body>
+</html>
