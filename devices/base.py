@@ -61,6 +61,17 @@ class AbstractDevice(ABC):
         """Immediate emergency stop. Must be synchronous and fast."""
         ...
 
+    def apply_ai_commands(self, commands: Dict[str, Any]) -> None:
+        """Apply a compiled intent from the orchestrator.
+
+        `commands` carries {pattern, speed, depth, base, intensity, commands},
+        as produced by intent_compiler. Concrete (not abstract) and a no-op by
+        default: the orchestrator calls this on whatever device is active, so a
+        driver that has no meaningful mapping should simply sit out an AI
+        session rather than raise.
+        """
+        log.debug("%s ignores AI commands: %s", self.device_type, commands)
+
     # ── State ──────────────────────────────────────────────────────────────────
 
     def get_state(self) -> DeviceState:

@@ -37,6 +37,8 @@ from config import (
     KOKORO_SPEED,
     KOKORO_DEVICE,
     DEFAULT_DEVICE_WS_URL,
+    BUTTPLUG_WS_URL,
+    BUTTPLUG_VIBE_FLOOR,
     COYOTE_BLE_NAME,
     COYOTE_SOFT_LIMIT_A,
     COYOTE_SOFT_LIMIT_B,
@@ -81,6 +83,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "coyote_soft_limit_a": COYOTE_SOFT_LIMIT_A,
     "coyote_soft_limit_b": COYOTE_SOFT_LIMIT_B,
     "coyote_freq_ms": COYOTE_DEFAULT_FREQ_MS,
+    "buttplug_ws_url": BUTTPLUG_WS_URL,
+    "buttplug_vibe_floor": BUTTPLUG_VIBE_FLOOR,
     "google_validation": {
         "ok": False,
         "message": "Not validated yet",
@@ -182,6 +186,9 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
     settings["coyote_soft_limit_a"] = _as_int(settings.get("coyote_soft_limit_a"), d["coyote_soft_limit_a"], 0, 200)
     settings["coyote_soft_limit_b"] = _as_int(settings.get("coyote_soft_limit_b"), d["coyote_soft_limit_b"], 0, 200)
     settings["coyote_freq_ms"] = _as_int(settings.get("coyote_freq_ms"), d["coyote_freq_ms"], 10, 1000)
+    settings["buttplug_ws_url"] = _as_clean_text(settings.get("buttplug_ws_url")) or d["buttplug_ws_url"]
+    settings["buttplug_vibe_floor"] = _as_float(
+        settings.get("buttplug_vibe_floor"), d["buttplug_vibe_floor"], 0.0, 0.9)
 
     settings["google_validation"] = _normalized_validation(settings.get("google_validation"))
     settings["groq_validation"] = _normalized_validation(settings.get("groq_validation"))
