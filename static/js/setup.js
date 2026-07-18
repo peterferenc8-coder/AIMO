@@ -38,7 +38,14 @@ const deviceTypeSetBtn = document.getElementById('device-type-set');
 const deviceTypeStatus = document.getElementById('device-type-status');
 const ossmPanel = document.getElementById('setup-ossm-panel');
 const coyotePanel = document.getElementById('setup-coyote-panel');
+const buttplugPanel = document.getElementById('setup-buttplug-panel');
 const setupPanelTitle = document.getElementById('setup-panel-title');
+
+const DEVICE_PANELS = {
+  ossm: { panel: ossmPanel, title: 'Position' },
+  coyote: { panel: coyotePanel, title: 'Coyote Status' },
+  buttplug: { panel: buttplugPanel, title: 'Position' },
+};
 
 async function loadDeviceType() {
   try {
@@ -56,15 +63,14 @@ async function loadDeviceType() {
 }
 
 function updateDevicePanels() {
-  if (currentDeviceType === 'ossm') {
-    ossmPanel.style.display = '';
-    coyotePanel.style.display = 'none';
-    setupPanelTitle.textContent = 'Position';
-  } else {
-    ossmPanel.style.display = 'none';
-    coyotePanel.style.display = '';
-    setupPanelTitle.textContent = 'Coyote Status';
-  }
+  const active = DEVICE_PANELS[currentDeviceType] || DEVICE_PANELS.ossm;
+  Object.values(DEVICE_PANELS).forEach(({ panel }) => {
+    if (panel) panel.style.display = 'none';
+  });
+  if (active.panel) active.panel.style.display = '';
+  setupPanelTitle.textContent = active.title;
+
+  if (currentDeviceType === 'buttplug') refreshButtplugDevices();
 }
 
 deviceTypeSetBtn.addEventListener('click', async () => {
@@ -260,7 +266,7 @@ if (coyoteConnectBtn) {
         coyoteDot.className = 'dot connected';
         // Also update the shared device-dot so app.js sees it
         const sharedDot = document.getElementById('device-dot');
-        if (sharedDot) sharedDot.className = 'dot connected';
+        if (sharedDot) sharedDot.className = 'dot ok';
         const sharedLabel = document.getElementById('device-label');
         if (sharedLabel) sharedLabel.textContent = 'Connected';
         window.App.openDeviceStream();
@@ -273,6 +279,185 @@ if (coyoteConnectBtn) {
       }
     } catch (err) {
       window.App.showError('Coyote connect error: ' + err.message);
+    }
+  });
+}
+
+// ── Buttplug / Intiface ─────────────────────────────────────────────────────
+
+const buttplugConnectBtn = document.getElementById('buttplug-connect');
+const buttplugScanBtn = document.getElementById('buttplug-scan');
+const buttplugUrlInput = document.getElementById('buttplug-ws-url');
+const buttplugConnStatus = document.getElementById('buttplug-conn-status');
+const buttplugDot = document.getElementById('buttplug-dot');
+const buttplugDeviceList = document.getElementById('buttplug-device-list');
+const buttplugDeviceCount = document.getElementById('buttplug-device-count');
+
+// Prefill from saved settings so the field matches the Settings tab.
+async function loadButtplugUrl() {
+  if (!buttplugUrlInput || buttplugUrlInput.value.trim()) return;
+  try {
+    const res = await fetch('/api/settings');
+    const data = await res.json();
+    if (data.ok && data.buttplug_ws_url) buttplugUrlInput.value = data.buttplug_ws_url;
+  } catch (err) {
+    console.warn('Failed to load Intiface URL', err);
+  }
+}
+
+function renderButtplugDevices(devices) {
+  if (!buttplugDeviceList) return;
+  buttplugDeviceList.innerHTML = '';
+
+  if (!devices || devices.length === 0) {
+    buttplugDeviceCount.textContent = 'No toys found';
+    const empty = document.createElement('p');
+    empty.className = 'buttplug-empty';
+    empty.textContent = 'Pair a toy in Intiface Central, then Scan.';
+    buttplugDeviceList.appendChild(empty);
+    return;
+  }
+
+  buttplugDeviceCount.textContent = `${devices.length} toy${devices.length === 1 ? '' : 's'}`;
+
+  devices.forEach((dev) => {
+    const row = document.createElement('label');
+    row.className = 'buttplug-device';
+
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = dev.selected;
+    box.dataset.index = dev.index;
+    box.addEventListener('change', submitButtplugSelection);
+
+    // Say what the toy will actually do, since the mapping isn't obvious.
+    const kinds = [];
+    if (dev.linear) kinds.push('stroker');
+    if (dev.actuators && dev.actuators.length) kinds.push(dev.actuators.join('/').toLowerCase());
+
+    const name = document.createElement('span');
+    name.className = 'buttplug-device-name';
+    name.textContent = dev.name;
+
+    const meta = document.createElement('span');
+    meta.className = 'buttplug-device-meta';
+    meta.textContent = kinds.length ? kinds.join(' · ') : 'no drivable actuators';
+
+    row.append(box, name, meta);
+    buttplugDeviceList.appendChild(row);
+  });
+}
+
+async function refreshButtplugDevices() {
+  if (currentDeviceType !== 'buttplug') return;
+  try {
+    const res = await fetch('/api/device/buttplug/devices');
+    const data = await res.json();
+    if (!data.ok) return;
+
+    const connected = data.connected;
+    buttplugConnStatus.textContent = connected ? 'Connected' : 'Offline';
+    buttplugDot.className = connected ? 'dot ok' : 'dot error';
+    buttplugScanBtn.disabled = !connected;
+    if (connected) {
+      renderButtplugDevices(data.devices);
+    } else {
+      buttplugDeviceList.innerHTML = '';
+      buttplugDeviceCount.textContent = 'Not connected';
+    }
+  } catch (err) {
+    console.warn('Failed to list Buttplug devices', err);
+  }
+}
+
+async function submitButtplugSelection() {
+  const boxes = buttplugDeviceList.querySelectorAll('input[type=checkbox]');
+  const checked = Array.from(boxes).filter((b) => b.checked).map((b) => Number(b.dataset.index));
+
+  // All-checked is sent as an empty list, which the driver reads as "everything",
+  // so newly discovered toys are picked up automatically.
+  const allChecked = checked.length === boxes.length;
+
+  try {
+    await fetch('/api/device/buttplug/select', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ indices: allChecked ? [] : checked }),
+    });
+  } catch (err) {
+    window.App.showError('Toy selection failed: ' + err.message);
+  }
+}
+
+if (buttplugConnectBtn) {
+  buttplugConnectBtn.addEventListener('click', async () => {
+    const btn = buttplugConnectBtn;
+    if (btn.dataset.connected === 'true') {
+      try {
+        await fetch('/api/device/disconnect', { method: 'POST' });
+        window.App.closeDeviceStream();
+        btn.textContent = 'Connect';
+        btn.classList.remove('btn-danger');
+        btn.dataset.connected = 'false';
+        buttplugConnStatus.textContent = 'Offline';
+        buttplugDot.className = 'dot';
+        buttplugScanBtn.disabled = true;
+        buttplugDeviceList.innerHTML = '';
+        buttplugDeviceCount.textContent = 'Not connected';
+      } catch (err) {
+        window.App.showError('Disconnect failed: ' + err.message);
+      }
+      return;
+    }
+
+    const url = buttplugUrlInput.value.trim();
+    try {
+      const res = await fetch('/api/device/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        btn.textContent = 'Disconnect';
+        btn.classList.add('btn-danger');
+        btn.dataset.connected = 'true';
+        buttplugConnStatus.textContent = 'Connected';
+        buttplugDot.className = 'dot ok';
+
+        const sharedDot = document.getElementById('device-dot');
+        if (sharedDot) sharedDot.className = 'dot ok';
+        const sharedLabel = document.getElementById('device-label');
+        if (sharedLabel) sharedLabel.textContent = 'Connected';
+
+        window.App.openDeviceStream();
+        // No homing step, so unlock the rest of the app immediately.
+        document.getElementById('tab-btn-manual').disabled = false;
+        document.getElementById('tab-btn-ai').disabled = false;
+        document.getElementById('tab-btn-custom').disabled = false;
+
+        refreshButtplugDevices();
+      } else {
+        window.App.showError('Intiface connect failed: ' + (data.error || 'unknown'));
+      }
+    } catch (err) {
+      window.App.showError('Intiface connect error: ' + err.message);
+    }
+  });
+}
+
+if (buttplugScanBtn) {
+  buttplugScanBtn.addEventListener('click', async () => {
+    buttplugScanBtn.disabled = true;
+    buttplugDeviceCount.textContent = 'Scanning...';
+    try {
+      await fetch('/api/device/buttplug/scan', { method: 'POST' });
+      // DeviceAdded arrives asynchronously; give Intiface a moment to report.
+      setTimeout(refreshButtplugDevices, 2000);
+    } catch (err) {
+      window.App.showError('Scan failed: ' + err.message);
+    } finally {
+      setTimeout(() => { buttplugScanBtn.disabled = false; }, 2000);
     }
   });
 }
@@ -331,4 +516,5 @@ if (setupStop) {
 // ── Init ───────────────────────────────────────────────────────────────────
 
 loadDeviceType();
+loadButtplugUrl();
 setSetupStep(1);
