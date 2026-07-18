@@ -95,7 +95,14 @@ class Avatar {
       this.ready = true;
       this._frameHead();
     }, undefined, (err) => {
+      // The model is gitignored on licence grounds, so a fresh clone has none.
+      // Say so in the panel rather than leaving an unexplained empty box.
       console.error('[avatar] failed to load model', err);
+      const note = document.createElement('p');
+      note.className = 'avatar-missing';
+      note.textContent = 'No avatar model. Add one at static/models/avatar.glb '
+        + '— see static/models/README.md';
+      this.container.appendChild(note);
     });
   }
 
