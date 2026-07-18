@@ -290,8 +290,12 @@ class ButtplugDevice(AbstractDevice):
             "MessageVersion": MESSAGE_VERSION,
         }})
         # ServerInfo lands in _recv_loop; ask for the inventory straight away so
-        # already-paired toys show up without waiting for a scan.
+        # already-paired toys show up immediately.
         await self._send({"RequestDeviceList": {"Id": self._next_id()}})
+        # Intiface normally scans on its own and reports toys via DeviceAdded,
+        # which is why there is no scan button in the UI. This one-shot is only a
+        # safety net for a server with auto-scan switched off — without it such a
+        # setup would show an empty list with no way to recover.
         await self._send({"StartScanning": {"Id": self._next_id()}})
 
     async def _ping_loop(self):
@@ -378,18 +382,28 @@ class ButtplugDevice(AbstractDevice):
                 "rotates": rotates,
             }
 
+    def _device_listing(self) -> List[dict]:
+        """Caller must hold _lock."""
+        return [
+            {
+                "index": d["index"],
+                "name": d["name"],
+                "linear": bool(d["linears"]),
+                "scalar": bool(d["scalars"]),
+                "actuators": [s["actuator"] for s in d["scalars"]],
+                "selected": (not self._selected) or (d["index"] in self._selected),
+            }
+            for d in self._devices.values()
+        ]
+
     def _publish_devices(self) -> None:
+        """Push the inventory to listeners so the setup UI stays live.
+
+        Intiface does its own scanning, so toys can appear at any time; this is
+        what carries a DeviceAdded through to the browser over SSE.
+        """
         with self._lock:
-            listing = [
-                {
-                    "index": d["index"],
-                    "name": d["name"],
-                    "linear": bool(d["linears"]),
-                    "scalar": bool(d["scalars"]),
-                    "actuators": [s["actuator"] for s in d["scalars"]],
-                }
-                for d in self._devices.values()
-            ]
+            listing = self._device_listing()
         self._update_state(device_count=len(listing), devices=listing)
 
     def _driven(self) -> List[dict]:
@@ -638,9 +652,7 @@ class ButtplugDevice(AbstractDevice):
             with self._lock:
                 self._selected = {int(i) for i in indices}
             log.info("Buttplug driving devices: %s", self._selected or "all")
-
-        elif cmd == "scan":
-            self._schedule(self._send({"StartScanning": {"Id": self._next_id()}}))
+            self._publish_devices()
 
         elif cmd == "set_vibe_floor":
             with self._lock:
@@ -745,14 +757,4 @@ class ButtplugDevice(AbstractDevice):
 
     def list_devices(self) -> List[dict]:
         with self._lock:
-            return [
-                {
-                    "index": d["index"],
-                    "name": d["name"],
-                    "linear": bool(d["linears"]),
-                    "scalar": bool(d["scalars"]),
-                    "actuators": [s["actuator"] for s in d["scalars"]],
-                    "selected": (not self._selected) or (d["index"] in self._selected),
-                }
-                for d in self._devices.values()
-            ]
+            return self._device_listing()

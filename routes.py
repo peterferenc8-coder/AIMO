@@ -770,18 +770,6 @@ def register_routes(app: Flask) -> None:
         dev.send_command({"cmd": "select_devices", "indices": indices})
         return jsonify({"ok": True, "devices": dev.list_devices()})
 
-    @app.post("/api/device/buttplug/scan")
-    def api_buttplug_scan():
-        """Ask Intiface to look for more toys. Results arrive asynchronously as
-        DeviceAdded messages, so the client re-polls the device list."""
-        dev, err = _active_buttplug()
-        if err:
-            return err
-        if not dev.get_state().connected:
-            return jsonify({"ok": False, "error": "Buttplug not connected"}), 409
-        dev.send_command({"cmd": "scan"})
-        return jsonify({"ok": True})
-
     # ── TTS Routes ──────────────────────────────────────────────────────────
 
     @app.get("/api/tts/audio/<string:cache_key>")

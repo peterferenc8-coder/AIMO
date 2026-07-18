@@ -106,12 +106,12 @@
 
       <div class="connection-bar">
         <label>Toys</label>
-        <button class="btn" id="buttplug-scan" disabled>Scan</button>
         <span id="buttplug-device-count" class="conn-status">Not connected</span>
       </div>
 
-      <!-- Populated from /api/device/buttplug/devices. Unchecked toys are left
-           alone, so a vibrator can be driven while a stroker sits idle. -->
+      <!-- Intiface does its own scanning, so this list is pushed over the device
+           stream as toys come and go. Unchecked toys are left alone, so a
+           vibrator can be driven while a stroker sits idle. -->
       <div id="buttplug-device-list" class="buttplug-devices"></div>
 
       <div class="device-info">
