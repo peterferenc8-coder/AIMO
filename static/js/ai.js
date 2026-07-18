@@ -54,15 +54,27 @@ function stopCurrentAudio() {
   activeWords = [];
   activeWordIndex = -1;
   isAudioPlaying = false;
+  // Let the avatar's mouth close (guarded: avatar.js is a deferred module and
+  // may not have loaded yet, and the model may still be downloading).
+  if (window.Avatar) window.Avatar.stopSpeaking();
   // Clear any highlighted words in the DOM
   document.querySelectorAll('.word-highlight').forEach(el => {
     el.classList.remove('word-highlight');
   });
 }
 
-function playAudioWithWordSync(audioUrl, words, speechEl) {
+/**
+ * Play `audioUrl`, highlighting `words` in `speechEl` and driving the avatar's
+ * mouth from `visemes`. `onFinished` fires when the line has been spoken (or
+ * immediately if there is nothing to speak) — video turns use it to hold the
+ * clip back until the announcement is done.
+ */
+function playAudioWithWordSync(audioUrl, words, speechEl, visemes, onFinished) {
+  const finish = () => { if (onFinished) { const f = onFinished; onFinished = null; f(); } };
+
   if (!audioUrl || !words || words.length === 0) {
     // No audio or no timing data – just show the full text immediately
+    finish();
     return;
   }
 
@@ -90,7 +102,16 @@ function playAudioWithWordSync(audioUrl, words, speechEl) {
   currentAudio.play().catch(err => {
     console.warn('Audio play failed:', err);
     isAudioPlaying = false;
+    if (window.Avatar) window.Avatar.stopSpeaking();
+    finish();   // never strand a video waiting on a line that cannot play
   });
+
+  // Drive the avatar's mouth off the audio element's own clock — the same
+  // clock the word highlighter below uses — so playback drift can never
+  // desync the lips from the voice.
+  if (window.Avatar && visemes && visemes.length) {
+    window.Avatar.speak(visemes, () => (currentAudio ? currentAudio.currentTime * 1000 : null));
+  }
 
   // Word highlight loop: check audio.currentTime against word timings
   currentWordTimer = setInterval(() => {
@@ -130,6 +151,8 @@ function playAudioWithWordSync(audioUrl, words, speechEl) {
 
   currentAudio.addEventListener('ended', () => {
     isAudioPlaying = false;
+    if (window.Avatar) window.Avatar.stopSpeaking();
+    finish();
     if (currentWordTimer) {
       clearInterval(currentWordTimer);
       currentWordTimer = null;
@@ -189,7 +212,9 @@ async function stopAiVideo(notifyEnded = false) {
     video.removeAttribute('src');
     video.load();
   }
-  if (panel) panel.style.display = 'none';
+  // Hand the columns back to the transcript and avatar.
+  const layout = document.querySelector('.ai-layout');
+  if (layout) layout.classList.remove('video-mode');
   if (aiVideoFunscriptLoaded) {
     aiVideoFunscriptLoaded = false;
     try { await fetch('/api/funscript/stop', { method: 'POST' }); } catch (e) { /* ignore */ }
@@ -209,8 +234,14 @@ async function playAiVideo(info) {
   // Tear down any previous clip first (silently — a new clip is starting).
   await stopAiVideo(false);
 
+  // The clip's own audio must not fight a voice-over: whatever the avatar was
+  // saying is finished or abandoned by the time we get here.
+  stopCurrentAudio();
+
   if (title) title.textContent = info.title || 'Video clip';
-  panel.style.display = 'block';
+  // The clip takes over the transcript's and avatar's columns while it plays.
+  const layout = document.querySelector('.ai-layout');
+  if (layout) layout.classList.add('video-mode');
 
   // Pre-load the funscript (server-side) so it's ready when the video starts.
   aiVideoFunscriptLoaded = false;
@@ -335,6 +366,10 @@ function makeAICard(item) {
     btn.addEventListener('click', () => sendFeedback(item.index, btn.dataset.reaction, fbBar, btn));
   });
 
+  // True once a video turn's spoken intro has taken responsibility for
+  // starting the clip, so the block below does not also start it.
+  let spokenIntroPending = false;
+
   // If we have TTS data, show words as spans and sync with audio
   if (item.audio_url && item.words && item.words.length > 0) {
     // Build placeholder spans (will be filled when audio starts)
@@ -349,8 +384,13 @@ function makeAICard(item) {
       }
     });
 
-    // Start audio playback immediately with word sync
-    playAudioWithWordSync(item.audio_url, item.words, speechEl);
+    // Start audio playback immediately with word sync + avatar lip-sync. On a
+    // video turn the line introduces the clip, so the clip waits for it.
+    playAudioWithWordSync(
+      item.audio_url, item.words, speechEl, item.visemes,
+      item.video ? () => playAiVideo(item.video) : null,
+    );
+    spokenIntroPending = Boolean(item.video);
   } else if (item.source === 'big' && item.speech) {
     // Fallback: typing animation when no TTS available
     enqueueTyping(speechEl, item.speech);
@@ -358,7 +398,9 @@ function makeAICard(item) {
     speechEl.textContent = item.speech || '';
   }
 
-  if (item.video) {
+  // A video turn whose line is already playing starts the clip from that
+  // line's completion callback instead — never both at once.
+  if (item.video && !spokenIntroPending) {
     playAiVideo(item.video);
   } else if (item.source === 'big' && item.commands) {
     updateParamChips(item.commands);

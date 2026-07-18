@@ -65,17 +65,6 @@
       Session Stream
       <span class="count" id="ai-count-stream">0</span>
     </div>
-    <div id="ai-video-panel" style="display:none; background:#0a0a0a; border:1px solid #333; border-radius:8px; margin:8px 0; padding:8px; position:relative;">
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-        <span id="ai-video-title" style="color:#00ffcc; font-size:13px;"></span>
-        <div style="display:flex; align-items:center; gap:6px;">
-          <button class="btn btn-sm btn-ghost" id="ai-video-skip" title="Skip clip">Skip ⏭</button>
-          <button class="btn btn-sm btn-ghost" id="ai-video-close" title="Stop clip">✕</button>
-        </div>
-      </div>
-      <video id="ai-video" preload="auto" playsinline controls
-             style="width:100%; max-height:55vh; display:block; background:#000; border-radius:4px;"></video>
-    </div>
     <div class="stream-body" id="ai-list-stream">
       <div class="empty-state">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -85,5 +74,23 @@
         Start a session to see the stream
       </div>
     </div>
+  </div>
+
+  {# Avatar and video are grid siblings of the stream, not children of it, so
+     each can own its own columns. The video takes over both while it plays. #}
+  <div id="ai-avatar-panel">
+    <div id="ai-avatar-stage"
+         data-model-url="{{ url_for('static', filename='models/avatar.glb') }}"></div>
+  </div>
+
+  <div id="ai-video-panel">
+    <div class="video-bar">
+      <span id="ai-video-title"></span>
+      <div class="video-actions">
+        <button class="btn btn-sm btn-ghost" id="ai-video-skip" title="Skip clip">Skip ⏭</button>
+        <button class="btn btn-sm btn-ghost" id="ai-video-close" title="Stop clip">✕</button>
+      </div>
+    </div>
+    <video id="ai-video" preload="auto" playsinline controls></video>
   </div>
 </div>

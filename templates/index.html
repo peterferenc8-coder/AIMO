@@ -55,6 +55,19 @@
     </section>
   </main>
 
+  <!-- three.js + three-vrm for the speaking avatar. The importmap must come
+       before any module script, and there can be only one per document. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "{{ url_for('static', filename='vendor/three/three.module.js') }}",
+      "three/addons/": "{{ url_for('static', filename='vendor/three/addons/') }}",
+      "@pixiv/three-vrm": "{{ url_for('static', filename='vendor/three-vrm/three-vrm.module.js') }}"
+    }
+  }
+  </script>
+  <script type="module" src="{{ url_for('static', filename='js/avatar.js') }}"></script>
+
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
   <script src="{{ url_for('static', filename='js/setup.js') }}"></script>
   <script src="{{ url_for('static', filename='js/manual.js') }}"></script>
