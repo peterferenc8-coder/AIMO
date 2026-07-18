@@ -112,6 +112,11 @@ function openDeviceStream() {
       if (window.CustomTab && window.CustomTab.onDevicePositionUpdate) {
           window.CustomTab.onDevicePositionUpdate(data);
         }
+      // Buttplug pushes its toy inventory whenever Intiface reports a device
+      // added or removed, so the setup list stays live without polling.
+      if (data.devices) {
+        window.dispatchEvent(new CustomEvent('buttplug-devices', { detail: data.devices }));
+      }
     } catch (e) {
       console.error('SSE parse error:', e, ev.data);
     }

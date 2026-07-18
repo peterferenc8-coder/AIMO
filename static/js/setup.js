@@ -286,7 +286,6 @@ if (coyoteConnectBtn) {
 // ── Buttplug / Intiface ─────────────────────────────────────────────────────
 
 const buttplugConnectBtn = document.getElementById('buttplug-connect');
-const buttplugScanBtn = document.getElementById('buttplug-scan');
 const buttplugUrlInput = document.getElementById('buttplug-ws-url');
 const buttplugConnStatus = document.getElementById('buttplug-conn-status');
 const buttplugDot = document.getElementById('buttplug-dot');
@@ -358,7 +357,6 @@ async function refreshButtplugDevices() {
     const connected = data.connected;
     buttplugConnStatus.textContent = connected ? 'Connected' : 'Offline';
     buttplugDot.className = connected ? 'dot ok' : 'dot error';
-    buttplugScanBtn.disabled = !connected;
     if (connected) {
       renderButtplugDevices(data.devices);
     } else {
@@ -401,7 +399,6 @@ if (buttplugConnectBtn) {
         btn.dataset.connected = 'false';
         buttplugConnStatus.textContent = 'Offline';
         buttplugDot.className = 'dot';
-        buttplugScanBtn.disabled = true;
         buttplugDeviceList.innerHTML = '';
         buttplugDeviceCount.textContent = 'Not connected';
       } catch (err) {
@@ -446,21 +443,13 @@ if (buttplugConnectBtn) {
   });
 }
 
-if (buttplugScanBtn) {
-  buttplugScanBtn.addEventListener('click', async () => {
-    buttplugScanBtn.disabled = true;
-    buttplugDeviceCount.textContent = 'Scanning...';
-    try {
-      await fetch('/api/device/buttplug/scan', { method: 'POST' });
-      // DeviceAdded arrives asynchronously; give Intiface a moment to report.
-      setTimeout(refreshButtplugDevices, 2000);
-    } catch (err) {
-      window.App.showError('Scan failed: ' + err.message);
-    } finally {
-      setTimeout(() => { buttplugScanBtn.disabled = false; }, 2000);
-    }
-  });
-}
+// Intiface scans on its own, so the inventory arrives unprompted over the
+// device stream. The initial fetch covers toys already paired before we
+// connected; everything after that is pushed.
+window.addEventListener('buttplug-devices', (ev) => {
+  if (currentDeviceType !== 'buttplug') return;
+  renderButtplugDevices(ev.detail);
+});
 
 // ── Wizard actions (OSSM only) ───────────────────────────────────────────────
 
