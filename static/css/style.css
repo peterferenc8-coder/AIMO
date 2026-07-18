@@ -430,12 +430,66 @@ input[type="range"] {
 }
 
 /* ── AI Tab ── */
+/* Six equal columns: controls 1, transcript 3, avatar 2. While a clip plays
+   the transcript and avatar give way and the video spans all 5 of their
+   columns — see .ai-layout.video-mode below. */
 .ai-layout {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: repeat(6, 1fr);
+  /* minmax(0, 1fr), not the default `auto`: an auto row sizes to its tallest
+     content, so a big clip stretches the row past the viewport instead of
+     being scaled down into it. */
+  grid-template-rows: minmax(0, 1fr);
   gap: 0;
   height: 100%;
   overflow: hidden;
+}
+/* min-width:0 everywhere: grid items default to min-content and long
+   transcript lines would otherwise blow the column widths out. */
+.ai-sidebar   { grid-column: span 1; min-width: 0; }
+.ai-stream    { grid-column: span 3; min-width: 0; }
+#ai-avatar-panel { grid-column: span 2; }
+
+/* Video sits in the same row, occupying everything but the sidebar. Hidden
+   until a clip plays — toggled by a class rather than an inline style so it
+   cannot fight the grid's own display value. */
+#ai-video-panel {
+  grid-column: 2 / -1;
+  grid-row: 1;
+  display: none;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;      /* flex/grid items floor at min-content without this */
+  overflow: hidden;
+  background: #0a0a0a;
+  padding: 8px;
+}
+.ai-layout.video-mode .ai-stream,
+.ai-layout.video-mode #ai-avatar-panel { display: none; }
+.ai-layout.video-mode #ai-video-panel { display: flex; }
+
+#ai-video-panel .video-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  flex-shrink: 0;
+}
+#ai-video-panel #ai-video-title { color: #00ffcc; font-size: 13px; }
+#ai-video-panel .video-actions { display: flex; align-items: center; gap: 6px; }
+/* Scale the clip to fit the panel rather than letting its native resolution
+   set the size: a 4K clip must shrink into the panel, not overflow it.
+   object-fit keeps the aspect ratio and letterboxes whatever is left over. */
+#ai-video {
+  flex: 1 1 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  object-fit: contain;
+  display: block;
+  background: #000;
+  border-radius: 4px;
 }
 .ai-sidebar {
   padding: 16px;
@@ -732,6 +786,39 @@ input[type="range"] {
   flex-direction: column;
   overflow: hidden;
 }
+/* Speaking avatar — sits between the stream header and the turn list, the
+   same way the video panel does, so .stream-body's flex:1 absorbs the rest. */
+#ai-avatar-panel {
+  height: 100%;
+  min-width: 0;
+  background: radial-gradient(ellipse at 50% 35%, #1b1f2a 0%, #0a0b0f 70%);
+  border-left: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+#ai-avatar-stage {
+  width: 100%;
+  height: 100%;
+}
+#ai-avatar-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.avatar-missing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 24px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted, #6b7280);
+}
+
 .stream-header {
   padding: 10px 18px;
   background: var(--surface2);
