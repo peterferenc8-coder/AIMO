@@ -250,6 +250,45 @@ header h1 {
   margin-left: auto;
 }
 
+/* ── Buttplug / Intiface toy list ── */
+.buttplug-devices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+}
+.buttplug-device {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.buttplug-device input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.buttplug-device-name {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.buttplug-device-meta {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.buttplug-empty,
+.device-info p {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 4px 0;
+}
+
 .wizard-steps {
   display: flex;
   flex-direction: column;
