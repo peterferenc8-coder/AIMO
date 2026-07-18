@@ -7,9 +7,11 @@ When the orchestrator gets a turn from the AI, it passes the speech text
 through synthesize().  The function returns:
   - a path to the generated audio file (WAV)
   - a list of word-level timing objects
+  - a list of viseme (mouth shape) events for avatar lip-sync
 
 The UI uses the timing data to highlight each word exactly when it is
-spoken, keeping text display and audio perfectly in sync.
+spoken, keeping text display and audio perfectly in sync.  The viseme
+track drives the 3D avatar's mouth.
 """
 
 import json
@@ -105,13 +107,15 @@ def synthesize(text: str, voice: str | None = None, speed: float | None = None) 
     Returns a dict with keys:
         audio_url   -- relative URL the frontend can fetch (/api/tts/audio/<id>)
         audio_path  -- absolute filesystem path to the WAV file
-        words       -- list of {"word": str, "start_ms": int, "end_ms": int}
+        words       -- list of {"word", "phonemes", "start_ms", "end_ms"}
+        visemes     -- list of {"t_ms", "dur_ms", "viseme", "weight"} for lip-sync
         duration_ms -- total audio duration in milliseconds
 
     The returned *words* list is already ordered and non-overlapping.
     """
     if not text or not text.strip():
-        return {"audio_url": None, "audio_path": None, "words": [], "duration_ms": 0}
+        return {"audio_url": None, "audio_path": None, "words": [],
+                "visemes": [], "duration_ms": 0}
 
     voice = voice or VOICE
     speed = speed if speed is not None else KOKORO_SPEED
@@ -142,7 +146,8 @@ def synthesize(text: str, voice: str | None = None, speed: float | None = None) 
 
     if not audio_chunks:
         log.warning("Kokoro produced no audio for: %s", text[:80])
-        return {"audio_url": None, "audio_path": None, "words": [], "duration_ms": 0}
+        return {"audio_url": None, "audio_path": None, "words": [],
+                "visemes": [], "duration_ms": 0}
 
     import numpy as np
 
@@ -159,12 +164,14 @@ def synthesize(text: str, voice: str | None = None, speed: float | None = None) 
 
     # -- Extract word timings from Kokoro tokens --------------------------
     words = _extract_word_timings(results)
+    visemes = _build_visemes(words)
     duration_ms = round(len(audio) / SAMPLE_RATE * 1000)
 
     meta = {
         "audio_url": f"/api/tts/audio/{cache_key}",
         "audio_path": str(cache_path),
         "words": words,
+        "visemes": visemes,
         "duration_ms": duration_ms,
     }
 
@@ -209,10 +216,16 @@ def clear_cache() -> int:
 
 # -- Internals ---------------------------------------------------------------
 
+# Bumped whenever the shape of the cached metadata changes, so stale sidecar
+# JSON (e.g. pre-viseme entries) is never served back.  v2: added phonemes +
+# viseme track.
+_META_VERSION = 2
+
+
 def _make_cache_key(text: str, voice: str, speed: float) -> str:
     """Deterministic, filesystem-safe cache key."""
     import hashlib
-    raw = f"{text.strip()}|{voice}|{speed:.3f}"
+    raw = f"{text.strip()}|{voice}|{speed:.3f}|v{_META_VERSION}"
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
     # sanitize voice name for filesystem safety
     safe_voice = re.sub(r"[^\w\-]+", "_", voice)
@@ -239,6 +252,7 @@ def _extract_word_timings(results) -> list[dict[str, Any]]:
             continue
 
         current_text: list[str] = []
+        current_phonemes: list[str] = []
         current_start: float | None = None
         current_end: float | None = None
         last_end = chunk_offset_seconds
@@ -257,6 +271,7 @@ def _extract_word_timings(results) -> list[dict[str, Any]]:
                 current_end = chunk_offset_seconds + float(end_ts)
 
             current_text.append(text)
+            current_phonemes.append(getattr(token, "phonemes", "") or "")
 
             # whitespace flag means this token completes a word
             if getattr(token, "whitespace", ""):
@@ -266,12 +281,14 @@ def _extract_word_timings(results) -> list[dict[str, Any]]:
                     end = current_end if current_end is not None else start
                     words.append({
                         "word": word_text,
+                        "phonemes": "".join(current_phonemes),
                         "start_ms": max(0, round(start * 1000)),
                         "end_ms": max(0, round(end * 1000)),
                     })
                     last_end = end
 
                 current_text = []
+                current_phonemes = []
                 current_start = None
                 current_end = None
 
@@ -282,6 +299,7 @@ def _extract_word_timings(results) -> list[dict[str, Any]]:
                 end = current_end if current_end is not None else start
                 words.append({
                     "word": word_text,
+                    "phonemes": "".join(current_phonemes),
                     "start_ms": max(0, round(start * 1000)),
                     "end_ms": max(0, round(end * 1000)),
                 })
@@ -294,6 +312,115 @@ def _extract_word_timings(results) -> list[dict[str, Any]]:
     # Post-process: ensure monotonic, non-overlapping, and clamp
     words = _sanitize_timings(words)
     return words
+
+
+# -- Viseme (lip-sync) generation --------------------------------------------
+#
+# Kokoro/misaki emit a *compressed* IPA where several diphthongs collapse to a
+# single uppercase char (A=eɪ, I=aɪ, O=oʊ, W=aʊ, Y=ɔɪ).  The full US symbol set
+# is misaki.en.US_VOCAB.  We fold that onto the five mouth shapes a VRM model
+# exposes as standard expressions -- aa/ih/ou/ee/oh -- plus "sil" (closed).
+#
+# Note the VRM names follow Japanese vowels (a/i/u/e/o), so IPA "i" as in
+# *see* maps to "ih", and IPA "ɛ" as in *bed* maps to "ee".  They are not the
+# English letter names they look like.
+_VISEME_MAP = {
+    # diphthongs (Kokoro's single-char forms) -- mapped to their opening vowel
+    "A": "ee", "I": "aa", "O": "oh", "W": "aa", "Y": "oh",
+    # monophthongs
+    "i": "ih", "u": "ou", "æ": "aa", "ɑ": "aa", "ɔ": "oh",
+    "ə": "aa", "ɛ": "ee", "ɜ": "ee", "ɪ": "ih", "ʊ": "ou",
+    "ʌ": "aa", "ᵊ": "aa", "ᵻ": "ih",
+    # bilabials -- the mouth must actually close, this is what sells lip-sync
+    "b": "sil", "p": "sil", "m": "sil",
+    # labiodental / rounded consonants
+    "f": "ou", "v": "ou", "w": "ou", "ɹ": "ou",
+    "ʃ": "ou", "ʒ": "ou", "ʧ": "ou", "ʤ": "ou",
+    # alveolar / dental -- narrow mouth
+    "l": "ih", "n": "ih", "t": "ih", "d": "ih", "s": "ih", "z": "ih",
+    "θ": "ih", "ð": "ih", "j": "ih", "ɾ": "ih", "ʔ": "ih",
+    # velars / glottal -- slightly open
+    "k": "aa", "ɡ": "aa", "ŋ": "aa", "h": "aa",
+}
+
+# Vowels hold longer than consonants; weighting the interpolation by these
+# beats an even split noticeably, for about four lines of code.
+_VOWELS = frozenset("AIOWYiuæɑɔəɛɜɪʊʌᵊᵻ")
+
+# How wide the mouth opens for each phoneme class.  Consonants at full weight
+# make the avatar look like it is chewing.
+_VOWEL_WEIGHT = 1.0
+_CONSONANT_WEIGHT = 0.45
+
+# Stress marks carry no mouth shape.
+_STRESS_MARKS = "ˈˌː"
+
+MIN_VISEME_MS = 40
+
+
+def _build_visemes(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Turn word-level phoneme strings + timings into a viseme track.
+
+    Kokoro gives us timings per *token* (usually a word), not per phoneme, so
+    each word's span is divided across its phonemes proportionally, weighting
+    vowels heavier than consonants.  This is an approximation -- exact
+    per-phoneme durations would mean reaching into the model's `pred_dur`
+    tensor -- but at conversational speed it reads correctly, because
+    neighbouring visemes blend on the client anyway.
+
+    Returns a list of {"t_ms", "dur_ms", "viseme", "weight"} ordered by time.
+    """
+    visemes: list[dict[str, Any]] = []
+
+    for w in words:
+        phonemes = w.get("phonemes") or ""
+        start_ms = w["start_ms"]
+        end_ms = w["end_ms"]
+        span = max(0, end_ms - start_ms)
+
+        # Strip stress/length marks, then keep only symbols we can render.
+        symbols = [c for c in phonemes if c not in _STRESS_MARKS]
+        symbols = [c for c in symbols if c in _VISEME_MAP]
+
+        if not symbols or span <= 0:
+            # Punctuation, silence, or a word with no usable G2P -- close up.
+            visemes.append({
+                "t_ms": start_ms,
+                "dur_ms": span,
+                "viseme": "sil",
+                "weight": 0.0,
+            })
+            continue
+
+        weights = [
+            _VOWEL_WEIGHT if c in _VOWELS else _CONSONANT_WEIGHT
+            for c in symbols
+        ]
+        total = sum(weights)
+
+        cursor = float(start_ms)
+        for symbol, weight in zip(symbols, weights):
+            dur = span * (weight / total)
+            visemes.append({
+                "t_ms": round(cursor),
+                "dur_ms": round(dur),
+                "viseme": _VISEME_MAP[symbol],
+                "weight": round(weight, 3),
+            })
+            cursor += dur
+
+    # Close the mouth after the final phoneme so it does not hang open.
+    if visemes:
+        last = visemes[-1]
+        visemes.append({
+            "t_ms": last["t_ms"] + last["dur_ms"],
+            "dur_ms": 120,
+            "viseme": "sil",
+            "weight": 0.0,
+        })
+
+    return visemes
 
 
 def _sanitize_timings(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -324,6 +451,11 @@ def _sanitize_timings(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if end > next_start:
                 end = next_start
 
-        out.append({"word": w["word"], "start_ms": start, "end_ms": end})
+        out.append({
+            "word": w["word"],
+            "phonemes": w.get("phonemes", ""),
+            "start_ms": start,
+            "end_ms": end,
+        })
 
     return out

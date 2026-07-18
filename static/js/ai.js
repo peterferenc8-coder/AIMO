@@ -54,13 +54,16 @@ function stopCurrentAudio() {
   activeWords = [];
   activeWordIndex = -1;
   isAudioPlaying = false;
+  // Let the avatar's mouth close (guarded: avatar.js is a deferred module and
+  // may not have loaded yet, and the model may still be downloading).
+  if (window.Avatar) window.Avatar.stopSpeaking();
   // Clear any highlighted words in the DOM
   document.querySelectorAll('.word-highlight').forEach(el => {
     el.classList.remove('word-highlight');
   });
 }
 
-function playAudioWithWordSync(audioUrl, words, speechEl) {
+function playAudioWithWordSync(audioUrl, words, speechEl, visemes) {
   if (!audioUrl || !words || words.length === 0) {
     // No audio or no timing data – just show the full text immediately
     return;
@@ -90,7 +93,15 @@ function playAudioWithWordSync(audioUrl, words, speechEl) {
   currentAudio.play().catch(err => {
     console.warn('Audio play failed:', err);
     isAudioPlaying = false;
+    if (window.Avatar) window.Avatar.stopSpeaking();
   });
+
+  // Drive the avatar's mouth off the audio element's own clock — the same
+  // clock the word highlighter below uses — so playback drift can never
+  // desync the lips from the voice.
+  if (window.Avatar && visemes && visemes.length) {
+    window.Avatar.speak(visemes, () => (currentAudio ? currentAudio.currentTime * 1000 : null));
+  }
 
   // Word highlight loop: check audio.currentTime against word timings
   currentWordTimer = setInterval(() => {
@@ -130,6 +141,7 @@ function playAudioWithWordSync(audioUrl, words, speechEl) {
 
   currentAudio.addEventListener('ended', () => {
     isAudioPlaying = false;
+    if (window.Avatar) window.Avatar.stopSpeaking();
     if (currentWordTimer) {
       clearInterval(currentWordTimer);
       currentWordTimer = null;
@@ -349,8 +361,8 @@ function makeAICard(item) {
       }
     });
 
-    // Start audio playback immediately with word sync
-    playAudioWithWordSync(item.audio_url, item.words, speechEl);
+    // Start audio playback immediately with word sync + avatar lip-sync
+    playAudioWithWordSync(item.audio_url, item.words, speechEl, item.visemes);
   } else if (item.source === 'big' && item.speech) {
     // Fallback: typing animation when no TTS available
     enqueueTyping(speechEl, item.speech);

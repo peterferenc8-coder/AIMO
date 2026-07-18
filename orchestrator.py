@@ -61,6 +61,9 @@ class DisplayItem:
     # ── TTS fields ────────────────────────────────────────────────────────
     audio_url: str | None = None
     words: list[dict] = field(default_factory=list)   # [{word, start_ms, end_ms}]
+    # Mouth-shape track for the avatar's lip-sync, aligned to the same audio
+    # clock as *words*: [{t_ms, dur_ms, viseme, weight}]
+    visemes: list[dict] = field(default_factory=list)
     duration_ms: int = 0
     # ── Video clip (play_video intent) ──────────────────────────────────────
     # When set, the frontend plays this Stash clip instead of running device
@@ -76,6 +79,7 @@ class DisplayItem:
             "index": self.index,
             "audio_url": self.audio_url,
             "words": self.words,
+            "visemes": self.visemes,
             "duration_ms": self.duration_ms,
             "video": self.video,
         }
@@ -744,6 +748,7 @@ class SessionOrchestrator:
             raw=turn.raw,
             audio_url=tts_meta.get("audio_url"),
             words=tts_meta.get("words", []),
+            visemes=tts_meta.get("visemes", []),
             duration_ms=tts_meta.get("duration_ms", 0),
             video=video,
         )
