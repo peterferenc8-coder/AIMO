@@ -4,6 +4,12 @@ __pycache__/
 *.bin
 logs/
 
+# Avatar models. Kept out of the repo on licence grounds, not size: VRoid Hub
+# models are commonly published with redistribution disallowed, and this repo
+# is public. See static/models/README.md.
+static/models/*.glb
+static/models/*.vrm
+
 # PyInstaller build artifacts
 build/
 dist/

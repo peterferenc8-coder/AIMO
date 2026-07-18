@@ -766,6 +766,19 @@ input[type="range"] {
   width: 100%;
   height: 100%;
 }
+.avatar-missing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 24px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted, #6b7280);
+}
 
 .stream-header {
   padding: 10px 18px;
