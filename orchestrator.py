@@ -50,6 +50,15 @@ import tts
 
 log = logging.getLogger(__name__)
 
+# Spoken before a clip when the model supplied no line of its own. The clip
+# takes over the screen once this finishes, so it doubles as the hand-off.
+VIDEO_INTRO_LINES = [
+    "I am going to play a video for you now. Enjoy!",
+    "Let me put something on for you. Enjoy it.",
+    "I found a clip for you. Watch this.",
+    "Here, watch this one with me.",
+]
+
 
 @dataclass
 class DisplayItem:
@@ -533,7 +542,12 @@ class SessionOrchestrator:
                 # command doesn't interrupt playback mid-clip. Release as soon as
                 # the frontend reports the clip stopped (end, seek-to-end, skip),
                 # falling back to the clip's real length if no signal arrives.
+                # The clip only starts once the announcement has finished
+                # speaking, so the fallback has to cover the line as well or it
+                # expires mid-clip when no "ended" signal arrives.
                 hold_ms = item.video.get("duration_ms") or 0
+                if hold_ms:
+                    hold_ms += item.duration_ms or 0
                 self._wait_video_done(hold_ms / 1000.0 if hold_ms else self.DISPLAY_INTERVAL)
             else:
                 self._sleep_session(self.DISPLAY_INTERVAL, epoch)
@@ -713,7 +727,18 @@ class SessionOrchestrator:
         Build a DisplayItem from a parsed Turn, running TTS synthesis
         to obtain audio and word-level timestamps (if TTS is enabled).
         """
+        # Resolve the clip first: whether this is a video turn decides whether
+        # the turn needs an announcement line below.
+        video = self._resolve_video(turn) if self._is_video_intent(turn) else None
+
         speech = turn.speech or ""
+        # A video turn speaks *before* the clip rather than over it — the clip
+        # replaces the text and avatar while it plays, and its own audio would
+        # fight a voice-over. If the model gave us no line for the turn, use a
+        # stock one so the cut to video is still introduced.
+        if video and not speech.strip():
+            speech = random.choice(VIDEO_INTRO_LINES)
+
         tts_meta: dict = {}
 
         if speech.strip() and self.tts_enabled:
@@ -736,7 +761,6 @@ class SessionOrchestrator:
                 "duration_ms": 0,
             }
 
-        video = self._resolve_video(turn) if self._is_video_intent(turn) else None
         # A video turn drives the device via its funscript, not via AI motion,
         # so it carries no device command block.
         commands = {} if video else turn.commands.as_dict()
