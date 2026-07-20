@@ -122,9 +122,33 @@ FLASK_HOST  = os.getenv("FLASK_HOST", "0.0.0.0")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # ── Kokoro TTS ───────────────────────────────────────────────────────────────
-KOKORO_VOICE = os.getenv("KOKORO_VOICE", "af_heart")
-KOKORO_SPEED = float(os.getenv("KOKORO_SPEED", "1.0"))
+# The default voice is a weighted style-vector blend (75% af_bella, 25%
+# af_nicole) saved as a .pt.  Kokoro's comma syntax averages voices evenly, so
+# a weighted mix has to be baked into a file; load_single_voice() accepts any
+# path ending in .pt.  Paired with speed 0.85 it gives the slower, breathier
+# delivery that the RVC pass below re-timbres into the target voice.
+_BLEND_VOICE = str(BASE_DIR / "RVC" / "voices" / "bella75_nicole25.pt")
+KOKORO_VOICE = os.getenv("KOKORO_VOICE", _BLEND_VOICE if os.path.exists(_BLEND_VOICE) else "af_heart")
+KOKORO_SPEED = float(os.getenv("KOKORO_SPEED", "0.85"))
 KOKORO_DEVICE = os.getenv("KOKORO_DEVICE", "auto")
+
+# ── RVC voice conversion (post-Kokoro) ───────────────────────────────────────
+# Applio runs in its own venv (numpy 2.x, faiss, torchcrepe) which conflicts
+# with this app's environment, so conversion happens in a persistent worker
+# subprocess rather than in-process.  See rvc_client.py -- it cannot be named
+# rvc.py, which would shadow Applio's own top-level `rvc` package.
+#
+# RVC is frame-synchronous: it changes timbre without changing duration, so the
+# word timings and viseme track produced by Kokoro stay valid unchanged.
+_RVC_DIR = BASE_DIR / "RVC"
+RVC_ENABLED = os.getenv("RVC_ENABLED", "true").lower() == "true"
+RVC_APPLIO_DIR = os.getenv("RVC_APPLIO_DIR", str(_RVC_DIR / "Applio"))
+RVC_PYTHON = os.getenv("RVC_PYTHON", str(_RVC_DIR / "Applio" / ".venv" / "bin" / "python"))
+RVC_MODEL = os.getenv("RVC_MODEL", str(_RVC_DIR / "lux" / "lux_300e_4800s.pth"))
+RVC_INDEX = os.getenv("RVC_INDEX", str(_RVC_DIR / "lux" / "lux.index"))
+RVC_PITCH = int(os.getenv("RVC_PITCH", "0"))          # semitones; >+3 thins out
+RVC_INDEX_RATE = float(os.getenv("RVC_INDEX_RATE", "0.7"))
+RVC_PROTECT = float(os.getenv("RVC_PROTECT", "0.33"))
 
 # ── Device bridge ────────────────────────────────────────────────────────────
 DEFAULT_DEVICE_WS_URL = os.getenv("DEVICE_WS_URL", "ws://localhost:8888")

@@ -16,3 +16,18 @@ dist/
 out/
 
 static/models/*
+
+# RVC voice-conversion workspace: the Applio checkout, its venv, trained
+# weights, and the ElevenLabs-generated training audio. Large, and the
+# training clips are third-party TTS output -- this repo is public.
+RVC/
+
+# Model weights (RVC checkpoints are 400MB-900MB each). Alongside *.onnx/*.bin
+# above -- none of these belong in a public repo.
+*.pth
+
+# Archived training runs. lux_rvc.zip is 1.9GB: the D_/G_ resume checkpoints
+# plus every epoch snapshot. Only the final weights and lux.index are needed at
+# inference, and those ship as GitHub Release assets, not in the repo.
+*_rvc.zip
+lux.index

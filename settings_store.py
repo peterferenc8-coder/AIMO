@@ -36,6 +36,9 @@ from config import (
     KOKORO_VOICE,
     KOKORO_SPEED,
     KOKORO_DEVICE,
+    RVC_ENABLED,
+    RVC_PITCH,
+    RVC_INDEX_RATE,
     DEFAULT_DEVICE_WS_URL,
     BUTTPLUG_WS_URL,
     BUTTPLUG_VIBE_FLOOR,
@@ -77,6 +80,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "kokoro_voice": KOKORO_VOICE,
     "kokoro_speed": KOKORO_SPEED,
     "kokoro_device": KOKORO_DEVICE,
+    # RVC re-timbres Kokoro output into the target voice.  Frame-synchronous,
+    # so word timings and visemes are unaffected.
+    "rvc_enabled": RVC_ENABLED,
+    "rvc_pitch": RVC_PITCH,
+    "rvc_index_rate": RVC_INDEX_RATE,
     # ── Device / hardware ──────────────────────────────────────────────────
     "device_ws_url": DEFAULT_DEVICE_WS_URL,
     "coyote_ble_name": COYOTE_BLE_NAME,
@@ -179,6 +187,13 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
     settings["kokoro_speed"] = _as_float(settings.get("kokoro_speed"), d["kokoro_speed"], 0.1, 4.0)
     device = _as_clean_text(settings.get("kokoro_device")).lower() or d["kokoro_device"]
     settings["kokoro_device"] = device if device in ("auto", "cpu", "cuda") else d["kokoro_device"]
+
+    # RVC voice conversion.  Pitch is clamped to +/-6 semitones: the model is
+    # only well-conditioned over its training F0 range (~157-252 Hz here), and
+    # transposing much past +3 makes the output thin and artifacty.
+    settings["rvc_enabled"] = bool(settings.get("rvc_enabled", d["rvc_enabled"]))
+    settings["rvc_pitch"] = _as_int(settings.get("rvc_pitch"), d["rvc_pitch"], -6, 6)
+    settings["rvc_index_rate"] = _as_float(settings.get("rvc_index_rate"), d["rvc_index_rate"], 0.0, 1.0)
 
     # Device / hardware
     settings["device_ws_url"] = _as_clean_text(settings.get("device_ws_url")) or d["device_ws_url"]
