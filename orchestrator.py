@@ -41,7 +41,6 @@ from config import (
 from ai_connector import GoogleAIConnector, GroqAIConnector
 from brain import Brain
 from feedback_store import add_banned_phrase, remove_banned_phrase
-from prompt_builder import PromptBuilder
 from response_parser import Commands, ResponseParser, Turn
 from session_manager import SessionManager
 from settings_store import load_settings
@@ -132,7 +131,6 @@ class SessionOrchestrator:
         self.brain = Brain()
         self.parser = ResponseParser()
         self.session = SessionManager()
-        self.prompt_builder = PromptBuilder()
 
         self.lock = threading.RLock()
         self.intent_compiler = IntentCompiler()
@@ -202,7 +200,9 @@ class SessionOrchestrator:
     def _push_collaborator_settings(self) -> None:
         """Push tunables into collaborators that own their own config."""
         s = self._settings
-        self.prompt_builder.banned_phrase_window = int(s.get("banned_phrase_window", 20))
+        self.brain.prompt_builder.banned_phrase_window = int(
+            s.get("banned_phrase_window", 20)
+        )
         tts.configure(
             voice=s.get("kokoro_voice"),
             speed=s.get("kokoro_speed"),
@@ -249,11 +249,65 @@ class SessionOrchestrator:
             proxy_address=self._settings.get("stash_proxy_address", ""),
         )
 
-        self.prompt_builder.reload()
+        self.brain.prompt_builder.reload()
         return self._settings
 
     def reload_prompts(self) -> None:
-        self.prompt_builder.reload()
+        self.brain.prompt_builder.reload()
+
+    def _compile_turns(self, turns: list[Turn], label: str = "Intent") -> list[Turn]:
+        """
+        Resolve each turn's narrative intent into concrete device commands.
+
+        Turns are mutated in place and returned. A turn whose intent the
+        compiler rejects falls through with whatever commands the LLM supplied
+        (legacy behaviour), so one bad intent never drops a turn.
+        """
+        compiled_turns: list[Turn] = []
+        for turn in turns:
+            self._maybe_inject_video(turn)
+            if self._is_video_intent(turn):
+                # play_video is resolved to a Stash clip in _build_display_item;
+                # it carries no device command of its own.
+                pass
+            elif turn.intent and turn.ai_intensity is not None:
+                try:
+                    compiled = self.intent_compiler.compile(
+                        intent=turn.intent,
+                        intensity=turn.ai_intensity,
+                    )
+                    # Pattern-level intensity goes into the legacy
+                    # commands.intensity field.
+                    turn.commands = Commands(
+                        pattern=compiled.pattern,
+                        speed=compiled.speed,
+                        depth=compiled.depth,
+                        base=compiled.base,
+                        intensity=compiled.pattern_intensity,
+                    )
+                    if turn.duration_ms is None:
+                        turn.duration_ms = compiled.duration_ms
+                except ValueError as exc:
+                    log.warning(
+                        "%s compilation failed for %s@%s: %s",
+                        label, turn.intent, turn.ai_intensity, exc
+                    )
+            compiled_turns.append(turn)
+        return compiled_turns
+
+    def _enqueue_turns(self, compiled_turns: list[Turn]) -> None:
+        """
+        Record compiled turns into session history and queue them for display.
+
+        Display items are built before the lock is taken: _build_display_item
+        can hit Stash to resolve a clip, which must not block the display loop.
+        """
+        self.brain.record_turns(compiled_turns)
+        self.session.add_turns(compiled_turns)
+
+        display_items = [self._build_display_item(t) for t in compiled_turns]
+        with self.lock:
+            self._pending.extend(display_items)
 
     def start(
         self,
@@ -305,41 +359,8 @@ class SessionOrchestrator:
             turns = self.parser.parse(raw_text)
 
             if turns:
-                # Compile any narrative intents returned by the seed prompt
-                compiled_turns: list[Turn] = []
-                for turn in turns:
-                    self._maybe_inject_video(turn)
-                    if self._is_video_intent(turn):
-                        pass  # resolved to a clip in _build_display_item
-                    elif turn.intent and turn.ai_intensity is not None:
-                        try:
-                            compiled = self.intent_compiler.compile(
-                                intent=turn.intent,
-                                intensity=turn.ai_intensity,
-                            )
-                            turn.commands = Commands(
-                                pattern=compiled.pattern,
-                                speed=compiled.speed,
-                                depth=compiled.depth,
-                                base=compiled.base,
-                                intensity=compiled.pattern_intensity,
-                            )
-                            if turn.duration_ms is None:
-                                turn.duration_ms = compiled.duration_ms
-                        except ValueError as exc:
-                            log.warning(
-                                "Seed intent compilation failed for %s@%s: %s",
-                                turn.intent, turn.ai_intensity, exc
-                            )
-                    compiled_turns.append(turn)
-
-                self.brain.record_turns(compiled_turns)
-                self.session.add_turns(compiled_turns)
-
-                with self.lock:
-                    for turn in compiled_turns:
-                        self._pending.append(self._build_display_item(turn))
-
+                compiled_turns = self._compile_turns(turns, label="Seed intent")
+                self._enqueue_turns(compiled_turns)
                 log.info("Seed prompt returned %d turns", len(compiled_turns))
             else:
                 log.warning("Seed prompt returned no parseable turns")
@@ -670,52 +691,8 @@ class SessionOrchestrator:
                 self._handle_big_failure("Empty parseable response")
                 return
 
-            # NEW: Compile intents to device commands
-            compiled_turns = []
-            for turn in turns:
-                self._maybe_inject_video(turn)
-                if self._is_video_intent(turn):
-                    # play_video is resolved to a Stash clip in _build_display_item;
-                    # it carries no device command of its own.
-                    pass
-                elif turn.intent and turn.ai_intensity is not None:
-                    try:
-                        compiled = self.intent_compiler.compile(
-                            intent=turn.intent,
-                            intensity=turn.ai_intensity,
-                        )
-                        # Update turn.commands with compiled values; place pattern-level
-                        # intensity into the legacy commands.intensity field.
-                        turn.commands = Commands(
-                            pattern=compiled.pattern,
-                            speed=compiled.speed,
-                            depth=compiled.depth,
-                            base=compiled.base,
-                            intensity=compiled.pattern_intensity,
-                        )
-                        # Override duration if compiler specifies one
-                        if turn.duration_ms is None:
-                            turn.duration_ms = compiled.duration_ms
-                    except ValueError as exc:
-                        log.warning(
-                            "Intent compilation failed for %s@%s: %s",
-                            turn.intent, turn.ai_intensity, exc
-                        )
-                        # Fall through with whatever commands the LLM provided (legacy)
-
-                compiled_turns.append(turn)
-
-            self.brain.record_turns(compiled_turns)
-            self.session.add_turns(compiled_turns)
-
-            display_items = []
-            for turn in compiled_turns:
-                item = self._build_display_item(turn)
-                display_items.append(item)
-
-            with self.lock:
-                for item in display_items:
-                    self._pending.append(item)
+            compiled_turns = self._compile_turns(turns, label="Intent")
+            self._enqueue_turns(compiled_turns)
 
             log.info(
                 "Big model returned %d turns  total_pending=%d",

@@ -130,12 +130,19 @@ if (launchLinuxEmuBtn) {
   });
 }
 
-// ── OSSM Connection ──────────────────────────────────────────────────────────
+// ── Shared connect/disconnect wiring ────────────────────────────────────────
 
-const setupConnectBtn = document.getElementById('setup-connect');
-if (setupConnectBtn) {
-  setupConnectBtn.addEventListener('click', async () => {
-    const btn = setupConnectBtn;
+// All three device cards run the same button state machine: POST connect or
+// disconnect, flip the label/class/dataset, and open or close the device
+// stream. Only the status text, the indicator dot, and the post-connect extras
+// differ, so those are the parameters.
+//
+// getUrl() returns the address to connect to, or null to abort silently once
+// it has reported its own validation error.
+function wireConnectToggle({ btn, label, statusEl, dotEl, getUrl, onConnect, onDisconnect }) {
+  if (!btn) return;
+
+  btn.addEventListener('click', async () => {
     if (btn.dataset.connected === 'true') {
       try {
         await fetch('/api/device/disconnect', { method: 'POST' });
@@ -143,15 +150,17 @@ if (setupConnectBtn) {
         btn.textContent = 'Connect';
         btn.classList.remove('btn-danger');
         btn.dataset.connected = 'false';
-        document.getElementById('device-conn-status').textContent = 'Offline';
+        if (statusEl) statusEl.textContent = 'Offline';
+        if (dotEl) dotEl.className = 'dot';
+        if (onDisconnect) onDisconnect();
       } catch (err) {
         window.App.showError('Disconnect failed: ' + err.message);
       }
       return;
     }
 
-    const url = document.getElementById('device-url').value.trim();
-    if (!url) return;
+    const url = getUrl();
+    if (url === null) return;
 
     try {
       const res = await fetch('/api/device/connect', {
@@ -164,16 +173,29 @@ if (setupConnectBtn) {
         btn.textContent = 'Disconnect';
         btn.classList.add('btn-danger');
         btn.dataset.connected = 'true';
-        document.getElementById('device-conn-status').textContent = 'Connected';
+        if (statusEl) statusEl.textContent = 'Connected';
+        if (dotEl) dotEl.className = 'dot ok';
         window.App.openDeviceStream();
+        if (onConnect) onConnect();
       } else {
-        window.App.showError('Device connect failed: ' + (data.error || 'unknown'));
+        window.App.showError(`${label} connect failed: ` + (data.error || 'unknown'));
       }
     } catch (err) {
-      window.App.showError('Device connect error: ' + err.message);
+      window.App.showError(`${label} connect error: ` + err.message);
     }
   });
 }
+
+// ── OSSM Connection ──────────────────────────────────────────────────────────
+
+// OSSM homes after connecting, so app.js unlocks the tabs on the homed event
+// rather than here.
+wireConnectToggle({
+  btn: document.getElementById('setup-connect'),
+  label: 'Device',
+  statusEl: document.getElementById('device-conn-status'),
+  getUrl: () => document.getElementById('device-url').value.trim() || null,
+});
 
 // ── Coyote BLE ──────────────────────────────────────────────────────────────
 
@@ -227,61 +249,25 @@ if (coyoteScanResults) {
   });
 }
 
-if (coyoteConnectBtn) {
-  coyoteConnectBtn.addEventListener('click', async () => {
-    const btn = coyoteConnectBtn;
-    if (btn.dataset.connected === 'true') {
-      try {
-        await fetch('/api/device/disconnect', { method: 'POST' });
-        window.App.closeDeviceStream();
-        btn.textContent = 'Connect';
-        btn.classList.remove('btn-danger');
-        btn.dataset.connected = 'false';
-        coyoteConnStatus.textContent = 'Offline';
-        coyoteDot.className = 'dot';
-      } catch (err) {
-        window.App.showError('Disconnect failed: ' + err.message);
-      }
-      return;
-    }
-
+wireConnectToggle({
+  btn: coyoteConnectBtn,
+  label: 'Coyote',
+  statusEl: coyoteConnStatus,
+  dotEl: coyoteDot,
+  getUrl: () => {
     const address = coyoteAddressInput.value.trim();
     if (!address) {
       window.App.showError('Please enter a BLE address or scan first');
-      return;
+      return null;
     }
-
-    try {
-      const res = await fetch('/api/device/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: address }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        btn.textContent = 'Disconnect';
-        btn.classList.add('btn-danger');
-        btn.dataset.connected = 'true';
-        coyoteConnStatus.textContent = 'Connected';
-        coyoteDot.className = 'dot connected';
-        // Also update the shared device-dot so app.js sees it
-        const sharedDot = document.getElementById('device-dot');
-        if (sharedDot) sharedDot.className = 'dot ok';
-        const sharedLabel = document.getElementById('device-label');
-        if (sharedLabel) sharedLabel.textContent = 'Connected';
-        window.App.openDeviceStream();
-        // Unlock tabs (Coyote has no homing, so unlock immediately)
-        document.getElementById('tab-btn-manual').disabled = false;
-        document.getElementById('tab-btn-ai').disabled = false;
-        document.getElementById('tab-btn-custom').disabled = false;
-      } else {
-        window.App.showError('Coyote connect failed: ' + (data.error || 'unknown'));
-      }
-    } catch (err) {
-      window.App.showError('Coyote connect error: ' + err.message);
-    }
-  });
-}
+    return address;
+  },
+  onConnect: () => {
+    window.App.setDeviceStatus(true);
+    // Coyote has no homing step, so unlock immediately.
+    window.App.unlockDeviceTabs();
+  },
+});
 
 // ── Buttplug / Intiface ─────────────────────────────────────────────────────
 
@@ -387,61 +373,23 @@ async function submitButtplugSelection() {
   }
 }
 
-if (buttplugConnectBtn) {
-  buttplugConnectBtn.addEventListener('click', async () => {
-    const btn = buttplugConnectBtn;
-    if (btn.dataset.connected === 'true') {
-      try {
-        await fetch('/api/device/disconnect', { method: 'POST' });
-        window.App.closeDeviceStream();
-        btn.textContent = 'Connect';
-        btn.classList.remove('btn-danger');
-        btn.dataset.connected = 'false';
-        buttplugConnStatus.textContent = 'Offline';
-        buttplugDot.className = 'dot';
-        buttplugDeviceList.innerHTML = '';
-        buttplugDeviceCount.textContent = 'Not connected';
-      } catch (err) {
-        window.App.showError('Disconnect failed: ' + err.message);
-      }
-      return;
-    }
-
-    const url = buttplugUrlInput.value.trim();
-    try {
-      const res = await fetch('/api/device/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        btn.textContent = 'Disconnect';
-        btn.classList.add('btn-danger');
-        btn.dataset.connected = 'true';
-        buttplugConnStatus.textContent = 'Connected';
-        buttplugDot.className = 'dot ok';
-
-        const sharedDot = document.getElementById('device-dot');
-        if (sharedDot) sharedDot.className = 'dot ok';
-        const sharedLabel = document.getElementById('device-label');
-        if (sharedLabel) sharedLabel.textContent = 'Connected';
-
-        window.App.openDeviceStream();
-        // No homing step, so unlock the rest of the app immediately.
-        document.getElementById('tab-btn-manual').disabled = false;
-        document.getElementById('tab-btn-ai').disabled = false;
-        document.getElementById('tab-btn-custom').disabled = false;
-
-        refreshButtplugDevices();
-      } else {
-        window.App.showError('Intiface connect failed: ' + (data.error || 'unknown'));
-      }
-    } catch (err) {
-      window.App.showError('Intiface connect error: ' + err.message);
-    }
-  });
-}
+wireConnectToggle({
+  btn: buttplugConnectBtn,
+  label: 'Intiface',
+  statusEl: buttplugConnStatus,
+  dotEl: buttplugDot,
+  getUrl: () => buttplugUrlInput.value.trim(),
+  onConnect: () => {
+    window.App.setDeviceStatus(true);
+    // No homing step, so unlock the rest of the app immediately.
+    window.App.unlockDeviceTabs();
+    refreshButtplugDevices();
+  },
+  onDisconnect: () => {
+    buttplugDeviceList.innerHTML = '';
+    buttplugDeviceCount.textContent = 'Not connected';
+  },
+});
 
 // Intiface scans on its own, so the inventory arrives unprompted over the
 // device stream. The initial fetch covers toys already paired before we

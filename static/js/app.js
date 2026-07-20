@@ -90,16 +90,20 @@ function updateAllGauges(data) {
   document.querySelectorAll('.readout-homed').forEach(el => el.textContent = data.homed ? 'Yes' : 'No');
 
   if (data.homed) {
-    const manualBtn = $('tab-btn-manual');
-    const aiBtn = $('tab-btn-ai');
-    const customBtn = $('tab-btn-custom');
-    const funscriptBtn = $('tab-btn-funscript');
-    if (manualBtn && manualBtn.disabled) manualBtn.disabled = false;
-    if (aiBtn && aiBtn.disabled) aiBtn.disabled = false;
-    if (customBtn && customBtn.disabled) customBtn.disabled = false;
-    if (funscriptBtn && funscriptBtn.disabled) funscriptBtn.disabled = false;
+    unlockDeviceTabs();
     window.dispatchEvent(new CustomEvent('device-homed'));
   }
+}
+
+// Enable every tab that needs a live device. Shared with setup.js, where
+// devices without a homing step (Coyote, Intiface) unlock on connect instead.
+// Keep this the single list: it previously drifted, leaving Funscript locked
+// for anything that never homes.
+function unlockDeviceTabs() {
+  ['manual', 'ai', 'custom', 'funscript'].forEach(tab => {
+    const btn = $(`tab-btn-${tab}`);
+    if (btn && btn.disabled) btn.disabled = false;
+  });
 }
 
 function openDeviceStream() {
@@ -157,4 +161,4 @@ const errorBannerClose = $('error-banner-close');
 if (errorBannerClose) errorBannerClose.addEventListener('click', hideError);
 
 // ── Expose globals ─────────────────────────────────────────────────────────
-window.App = { showError, showInfo, hideError, setDeviceStatus, openDeviceStream, closeDeviceStream, sendDeviceCmd };
+window.App = { showError, showInfo, hideError, setDeviceStatus, openDeviceStream, closeDeviceStream, sendDeviceCmd, unlockDeviceTabs };
