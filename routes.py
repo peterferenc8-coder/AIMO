@@ -606,8 +606,13 @@ def register_routes(app: Flask) -> None:
     @app.get("/api/health")
     def api_health():
         status = _orchestrator.big_connector.health_check()
+        # The session status is merged in flat because the UI reads big_model
+        # and message alongside ok. Its own "ok" is dropped: it is hardcoded
+        # True and would otherwise mask a failing connector.
+        session = dict(_orchestrator.status)
+        session.pop("ok", None)
+        status.update(session)
         code = 200 if status["ok"] else 503
-        status.update(_orchestrator.status)
         return jsonify(status), code
 
     # ── Generic Device Routes ───────────────────────────────────────────────

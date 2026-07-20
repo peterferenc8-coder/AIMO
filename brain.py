@@ -105,6 +105,15 @@ class Brain:
     # ── Proxied properties ────────────────────────────────────────────────────
 
     @property
+    def prompt_builder(self):
+        """
+        Expose the builder that actually renders prompts, so callers can push
+        settings into it. There must only ever be one: a second instance would
+        accept settings and reloads that never reach the prompts being sent.
+        """
+        return self._prompt_builder
+
+    @property
     def pattern_loader(self):
         """Expose the pattern loader so routes can list pattern names."""
         return self._prompt_builder.pattern_loader
