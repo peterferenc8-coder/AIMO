@@ -208,6 +208,15 @@ class SessionOrchestrator:
             speed=s.get("kokoro_speed"),
             device=s.get("kokoro_device"),
         )
+        try:
+            import rvc_client as rvc
+            rvc.configure(
+                enabled=s.get("rvc_enabled"),
+                pitch=s.get("rvc_pitch"),
+                index_rate=s.get("rvc_index_rate"),
+            )
+        except Exception:  # noqa: BLE001 - RVC is optional
+            pass
 
     def apply_settings(self, settings: dict[str, str]) -> dict[str, str]:
         """Update live connectors and prompt assets from saved settings."""

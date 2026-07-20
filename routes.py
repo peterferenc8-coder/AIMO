@@ -49,6 +49,7 @@ PLAIN_SETTING_KEYS = (
     "default_turns", "banned_phrase_window", "display_interval",
     "low_watermark", "high_watermark", "generator_sleep",
     "kokoro_voice", "kokoro_speed", "kokoro_device",
+    "rvc_enabled", "rvc_pitch", "rvc_index_rate",
     "device_ws_url", "coyote_ble_name",
     "coyote_soft_limit_a", "coyote_soft_limit_b", "coyote_freq_ms",
     "buttplug_ws_url", "buttplug_vibe_floor",

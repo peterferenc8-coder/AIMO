@@ -30,9 +30,20 @@ log = logging.getLogger(__name__)
 
 # -- Configuration -----------------------------------------------------------
 SAMPLE_RATE = 24_000
-VOICE = os.getenv("KOKORO_VOICE", "af_heart")
-KOKORO_SPEED = float(os.getenv("KOKORO_SPEED", "1.0"))
-DEVICE = os.getenv("KOKORO_DEVICE", "auto")  # auto | cpu | cuda
+
+# Defaults come from config so that direct synthesize() calls and the
+# settings-driven path agree.  config already applies the KOKORO_* env
+# overrides; duplicating os.getenv() here would silently diverge from it.
+try:
+    import config as _config
+    VOICE = _config.KOKORO_VOICE
+    KOKORO_SPEED = _config.KOKORO_SPEED
+    DEVICE = _config.KOKORO_DEVICE
+except Exception:  # noqa: BLE001 - keep tts.py importable standalone
+    VOICE = os.getenv("KOKORO_VOICE", "af_heart")
+    KOKORO_SPEED = float(os.getenv("KOKORO_SPEED", "1.0"))
+    DEVICE = os.getenv("KOKORO_DEVICE", "auto")  # auto | cpu | cuda
+
 AUDIO_CACHE_DIR = Path(tempfile.gettempdir()) / "aimee_tts"
 
 # Lazy-import Kokoro so the app can start even if the package is not installed.
@@ -167,12 +178,44 @@ def synthesize(text: str, voice: str | None = None, speed: float | None = None) 
     visemes = _build_visemes(words)
     duration_ms = round(len(audio) / SAMPLE_RATE * 1000)
 
+    # -- Optional RVC voice conversion ------------------------------------
+    # Re-timbres the Kokoro audio into the target voice.  RVC is
+    # frame-synchronous, so duration is preserved to within a couple of ~10ms
+    # frames and the word/viseme tracks above stay valid as-is.  Any failure
+    # leaves the plain Kokoro audio in place.
+    rvc_applied = False
+    if _rvc_enabled():
+        import rvc_client as rvc
+
+        raw_path = cache_path.with_name(cache_path.stem + ".kokoro.wav")
+        try:
+            cache_path.replace(raw_path)
+            result = rvc.convert(str(raw_path), str(cache_path))
+            if result and cache_path.exists():
+                rvc_applied = True
+                # Trust the converted file's real length rather than assuming
+                # it matches; the frame grid can shave a few ms.
+                duration_ms = result.get("duration_ms", duration_ms)
+            else:
+                raw_path.replace(cache_path)  # restore Kokoro audio
+        except Exception as exc:  # noqa: BLE001 - never lose speech over this
+            log.warning("RVC conversion errored (%s); using Kokoro audio", exc)
+            if raw_path.exists() and not cache_path.exists():
+                raw_path.replace(cache_path)
+        finally:
+            if raw_path.exists():
+                try:
+                    raw_path.unlink()
+                except OSError:
+                    pass
+
     meta = {
         "audio_url": f"/api/tts/audio/{cache_key}",
         "audio_path": str(cache_path),
         "words": words,
         "visemes": visemes,
         "duration_ms": duration_ms,
+        "rvc": rvc_applied,
     }
 
     with cache_meta.open("w", encoding="utf-8") as fh:
@@ -218,17 +261,38 @@ def clear_cache() -> int:
 
 # Bumped whenever the shape of the cached metadata changes, so stale sidecar
 # JSON (e.g. pre-viseme entries) is never served back.  v2: added phonemes +
-# viseme track.
-_META_VERSION = 2
+# viseme track.  v3: audio may be RVC-converted, so v2 entries sound wrong.
+_META_VERSION = 3
+
+
+def _rvc_enabled() -> bool:
+    """True when RVC conversion should be attempted for new synthesis."""
+    try:
+        import config
+        import rvc_client as rvc
+        return bool(config.RVC_ENABLED) and rvc.available()
+    except Exception:  # noqa: BLE001 - RVC is strictly optional
+        return False
+
+
+def _rvc_signature() -> str:
+    """Identifies the conversion settings, so changing them busts the cache."""
+    if not _rvc_enabled():
+        return "off"
+    import config
+    model = os.path.basename(config.RVC_MODEL)
+    return f"{model}:{config.RVC_PITCH}:{config.RVC_INDEX_RATE:.2f}:{config.RVC_PROTECT:.2f}"
 
 
 def _make_cache_key(text: str, voice: str, speed: float) -> str:
     """Deterministic, filesystem-safe cache key."""
     import hashlib
-    raw = f"{text.strip()}|{voice}|{speed:.3f}|v{_META_VERSION}"
+    raw = f"{text.strip()}|{voice}|{speed:.3f}|{_rvc_signature()}|v{_META_VERSION}"
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
-    # sanitize voice name for filesystem safety
-    safe_voice = re.sub(r"[^\w\-]+", "_", voice)
+    # A voice may be a bare name ("af_heart") or a path to a blended .pt pack;
+    # use just the stem so cache filenames stay short and readable.
+    label = Path(voice).stem if voice.endswith(".pt") else voice
+    safe_voice = re.sub(r"[^\w\-]+", "_", label)[:40]
     return f"{safe_voice}_{digest}"
 
 
