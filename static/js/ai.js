@@ -13,6 +13,11 @@ let currentWordTimer = null;
 let activeWords = [];      // [{word, start_ms, end_ms}, ...]
 let activeWordIndex = -1;
 let isAudioPlaying = false;
+let activeVisemes = null;  // viseme track of the line being spoken (for resume)
+// Completion callback of the line being spoken. A video turn hangs its clip
+// hand-off on this, so it must never be dropped silently: tearing the audio
+// down calls it with aborted=true so the backend's hold gets released.
+let currentAudioFinish = null;
 
 const typingQueue = [];
 let isTyping = false;
@@ -51,8 +56,16 @@ function stopCurrentAudio() {
     clearInterval(currentWordTimer);
     currentWordTimer = null;
   }
+  // The line will never reach its 'ended' event now — settle its completion
+  // callback as aborted so a video turn doesn't strand the backend's hold.
+  if (currentAudioFinish) {
+    const abort = currentAudioFinish;
+    currentAudioFinish = null;
+    abort(true);
+  }
   activeWords = [];
   activeWordIndex = -1;
+  activeVisemes = null;
   isAudioPlaying = false;
   // Let the avatar's mouth close (guarded: avatar.js is a deferred module and
   // may not have loaded yet, and the model may still be downloading).
@@ -64,13 +77,46 @@ function stopCurrentAudio() {
 }
 
 /**
+ * Suspend the line currently being spoken without discarding it, so resume can
+ * pick it up where it stopped. Unlike stopCurrentAudio() this keeps the audio
+ * element (and therefore its 'ended' event and completion callback) alive.
+ */
+function pauseCurrentAudio() {
+  if (currentAudio && !currentAudio.paused) currentAudio.pause();
+  isAudioPlaying = false;
+  // Let the mouth close while nothing is being said; the viseme track is
+  // re-armed on resume.
+  if (window.Avatar) window.Avatar.stopSpeaking();
+}
+
+/** Continue the suspended line, re-arming word highlighting and lip-sync. */
+function resumeCurrentAudio() {
+  // `ended` also reads as paused — resuming that would replay the whole line.
+  if (!currentAudio || !currentAudio.paused || currentAudio.ended) return;
+  isAudioPlaying = true;
+  if (window.Avatar && activeVisemes && activeVisemes.length) {
+    window.Avatar.speak(activeVisemes, () => (currentAudio ? currentAudio.currentTime * 1000 : null));
+  }
+  currentAudio.play().catch(err => {
+    console.warn('Audio resume failed:', err);
+    // Never leave a video turn waiting on a line that cannot play.
+    stopCurrentAudio();
+  });
+}
+
+/**
  * Play `audioUrl`, highlighting `words` in `speechEl` and driving the avatar's
- * mouth from `visemes`. `onFinished` fires when the line has been spoken (or
- * immediately if there is nothing to speak) — video turns use it to hold the
- * clip back until the announcement is done.
+ * mouth from `visemes`. `onFinished(aborted)` fires when the line has been
+ * spoken — or with aborted=true if the line was torn down before finishing.
+ * Video turns use it to hold the clip back until the announcement is done.
  */
 function playAudioWithWordSync(audioUrl, words, speechEl, visemes, onFinished) {
-  const finish = () => { if (onFinished) { const f = onFinished; onFinished = null; f(); } };
+  // Deregister before invoking: the callback may start a clip, which tears the
+  // audio down again and would otherwise re-enter this.
+  const finish = (aborted = false) => {
+    if (currentAudioFinish === finish) currentAudioFinish = null;
+    if (onFinished) { const f = onFinished; onFinished = null; f(aborted); }
+  };
 
   if (!audioUrl || !words || words.length === 0) {
     // No audio or no timing data – just show the full text immediately
@@ -82,6 +128,8 @@ function playAudioWithWordSync(audioUrl, words, speechEl, visemes, onFinished) {
 
   activeWords = words;
   activeWordIndex = -1;
+  activeVisemes = visemes;
+  currentAudioFinish = finish;
   isAudioPlaying = true;
 
   // Build word spans inside speechEl for highlighting
@@ -199,6 +247,17 @@ function enqueueTyping(el, text) {
 
 // ── AI video clip (play_video intent) ──────────────────────────────────────
 let aiVideoFunscriptLoaded = false;
+
+/**
+ * Tell the backend a clip turn is over even though no clip ever played. The
+ * display loop holds the whole stream while it waits for a video turn, so an
+ * announcement that gets cut short (pause, stop, a new line) must release that
+ * hold — otherwise nothing further is displayed until the clip's full length
+ * has elapsed.
+ */
+async function releaseVideoHold() {
+  try { await fetch('/api/video/ended', { method: 'POST' }); } catch (e) { /* ignore */ }
+}
 
 // `notifyEnded` tells the backend the clip stopped so AI device motion resumes
 // right away. Pass false for silent teardown (e.g. before loading the next clip
@@ -388,7 +447,9 @@ function makeAICard(item) {
     // video turn the line introduces the clip, so the clip waits for it.
     playAudioWithWordSync(
       item.audio_url, item.words, speechEl, item.visemes,
-      item.video ? () => playAiVideo(item.video) : null,
+      item.video
+        ? (aborted) => (aborted ? releaseVideoHold() : playAiVideo(item.video))
+        : null,
     );
     spokenIntroPending = Boolean(item.video);
   } else if (item.source === 'big' && item.speech) {
@@ -552,7 +613,9 @@ document.getElementById('ai-pause').addEventListener('click', async () => {
     updateAIStatus(data.state);
     isRunning = data.state === 'running';
     stopTimer();
-    stopCurrentAudio(); // Pause audio too
+    // Suspend — don't tear down. Tearing the line down would kill the 'ended'
+    // event a video turn's clip hand-off hangs on, stalling the stream.
+    pauseCurrentAudio();
     const aiVideoEl = document.getElementById('ai-video');
     if (aiVideoEl && !aiVideoEl.paused) aiVideoEl.pause(); // also pause any clip
 
@@ -593,6 +656,14 @@ document.getElementById('ai-resume').addEventListener('click', async () => {
     isRunning = data.state === 'running';
     if (isRunning) {
       startTimer();
+
+      // Pick the interrupted line back up, then the clip it was introducing
+      // (or the clip that was already on screen when we paused).
+      resumeCurrentAudio();
+      const aiVideoEl = document.getElementById('ai-video');
+      if (aiVideoEl && aiVideoEl.getAttribute('src') && aiVideoEl.paused && !isAudioPlaying) {
+        aiVideoEl.play().catch(err => console.warn('Clip resume failed:', err));
+      }
 
       // Restart the pattern if one is active
       if (currentPattern) {
