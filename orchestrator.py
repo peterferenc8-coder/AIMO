@@ -611,17 +611,22 @@ class SessionOrchestrator:
         """
         Wait until the clip stops playing, the session is stopped, or
         `max_seconds` elapses as a safety fallback — whichever comes first.
+
+        The fallback counts down only while the session is running: a paused
+        session has the clip paused on screen too, so a wall-clock deadline
+        would expire mid-clip and let AI motion cut in over it.
         """
-        deadline = time.monotonic() + max(0.0, max_seconds)
-        while True:
+        remaining = max(0.0, max_seconds)
+        while remaining > 0:
             with self.lock:
                 if self.state == "idle":
                     return
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+                paused = self.state == "paused"
+            slice_s = min(0.5, remaining)
+            if self._video_done.wait(timeout=slice_s):
                 return
-            if self._video_done.wait(timeout=min(0.5, remaining)):
-                return
+            if not paused:
+                remaining -= slice_s
 
     # ── Generator loop (producer) ─────────────────────────────────────────
 
