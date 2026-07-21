@@ -109,6 +109,55 @@ def _cuda_available() -> bool:
         return False
 
 
+# -- Sentence chunking -------------------------------------------------------
+#
+# Kokoro is StyleTTS2: it predicts ONE style vector and ONE duration track per
+# chunk it is handed.  Feed it a whole paragraph and the terminal contours --
+# the fall on ".", the rise on "?" -- get averaged across every sentence in it,
+# which is what makes long turns read flat and rushed.  Splitting per sentence
+# gives each one its own contour, at the cost of one extra forward pass each.
+#
+# The lookbehind keeps the punctuation attached to the sentence it ends; only
+# the whitespace after it is consumed by re.split.
+_SPLIT_PATTERN = r"(?<=[.!?…])\s+|\n+"
+
+# Extra trailing silence per terminal punctuation, in ms at speed 1.0.  These
+# are ON TOP of the lead-in/tail-out padding Kokoro puts around every chunk,
+# measured at ~525ms between sentences on its own -- so keep them small.  Much
+# past this and short fragments ("Deepening. Slowly.") start reading stilted
+# rather than deliberate.  Ordering follows the measured pause ranking: a
+# question holds longest, a comma barely at all.
+_GAP_MS = {"?": 220, "…": 180, "!": 120, ".": 90, ",": 0}
+_DEFAULT_GAP_MS = 40
+
+
+def _sentence_gaps(results, speed: float) -> list[int]:
+    """
+    Silence to append after each result chunk, in samples, aligned 1:1 with
+    *results*.  Scaled by 1/speed so the pauses stay in proportion when the
+    whole delivery is slowed down.  The final chunk gets none -- trailing dead
+    air just delays the next turn.
+    """
+    gaps: list[int] = []
+    for result in results:
+        if getattr(result, "audio", None) is None:
+            gaps.append(0)
+            continue
+        graphemes = (getattr(result, "graphemes", "") or "").rstrip()
+        # An ASCII "..." is the same held pause as a real ellipsis.
+        if graphemes.endswith("..."):
+            ms = _GAP_MS["…"]
+        elif graphemes:
+            ms = _GAP_MS.get(graphemes[-1], _DEFAULT_GAP_MS)
+        else:
+            ms = _DEFAULT_GAP_MS
+        gaps.append(round(SAMPLE_RATE * ms / 1000 / max(speed, 0.1)))
+
+    if gaps:
+        gaps[-1] = 0
+    return gaps
+
+
 # -- Public API --------------------------------------------------------------
 
 def synthesize(text: str, voice: str | None = None, speed: float | None = None) -> dict[str, Any]:
@@ -146,21 +195,29 @@ def synthesize(text: str, voice: str | None = None, speed: float | None = None) 
         return meta
 
     # -- Synthesis --------------------------------------------------------
+    import numpy as np
+
     pipeline = _get_pipeline()
-    results = list(pipeline(text, voice=voice, speed=speed, split_pattern=r"\n+"))
+    results = list(pipeline(text, voice=voice, speed=speed,
+                            split_pattern=_SPLIT_PATTERN))
 
-    # Concatenate audio chunks
+    # Concatenate audio chunks, padding each sentence with the pause its
+    # terminal punctuation calls for.
+    gaps = _sentence_gaps(results, speed)
     audio_chunks = []
-    for result in results:
-        if result.audio is not None:
-            audio_chunks.append(result.audio)
+    got_audio = False
+    for result, gap in zip(results, gaps):
+        if result.audio is None:
+            continue
+        got_audio = True
+        audio_chunks.append(np.asarray(result.audio, dtype=np.float32))
+        if gap:
+            audio_chunks.append(np.zeros(gap, dtype=np.float32))
 
-    if not audio_chunks:
+    if not got_audio:
         log.warning("Kokoro produced no audio for: %s", text[:80])
         return {"audio_url": None, "audio_path": None, "words": [],
                 "visemes": [], "duration_ms": 0}
-
-    import numpy as np
 
     audio = np.concatenate(audio_chunks)
 
@@ -174,7 +231,7 @@ def synthesize(text: str, voice: str | None = None, speed: float | None = None) 
     sf.write(str(cache_path), audio, SAMPLE_RATE)
 
     # -- Extract word timings from Kokoro tokens --------------------------
-    words = _extract_word_timings(results)
+    words = _extract_word_timings(results, gaps)
     visemes = _build_visemes(words)
     duration_ms = round(len(audio) / SAMPLE_RATE * 1000)
 
@@ -262,7 +319,7 @@ def clear_cache() -> int:
 # Bumped whenever the shape of the cached metadata changes, so stale sidecar
 # JSON (e.g. pre-viseme entries) is never served back.  v2: added phonemes +
 # viseme track.  v3: audio may be RVC-converted, so v2 entries sound wrong.
-_META_VERSION = 3
+_META_VERSION = 4
 
 
 def _rvc_enabled() -> bool:
@@ -296,22 +353,27 @@ def _make_cache_key(text: str, voice: str, speed: float) -> str:
     return f"{safe_voice}_{digest}"
 
 
-def _extract_word_timings(results) -> list[dict[str, Any]]:
+def _extract_word_timings(results, gaps=None) -> list[dict[str, Any]]:
     """
     Walk through every Kokoro result and its tokens, grouping tokens into
     words using the whitespace flag.  Produces word-level start/end times
     in milliseconds.
+
+    *gaps* is the per-chunk trailing silence in samples that synthesize()
+    spliced into the audio; it has to be walked in here too or every word
+    after the first pause drifts early and the visemes desync.
     """
     words: list[dict[str, Any]] = []
     chunk_offset_seconds = 0.0
+    gaps = gaps or [0] * len(results)
 
-    for result in results:
+    for result, gap in zip(results, gaps):
         tokens = getattr(result, "tokens", None) or []
         if not tokens:
             # No token data -- fall back to chunk-duration approximation
             audio = getattr(result, "audio", None)
             if audio is not None:
-                chunk_dur = len(audio) / SAMPLE_RATE
+                chunk_dur = (len(audio) + gap) / SAMPLE_RATE
                 chunk_offset_seconds += chunk_dur
             continue
 
@@ -368,10 +430,11 @@ def _extract_word_timings(results) -> list[dict[str, Any]]:
                     "end_ms": max(0, round(end * 1000)),
                 })
 
-        # Advance offset by the audio length of this result chunk
+        # Advance offset by the audio length of this result chunk, plus the
+        # silence spliced in after it.
         audio = getattr(result, "audio", None)
         if audio is not None:
-            chunk_offset_seconds += len(audio) / SAMPLE_RATE
+            chunk_offset_seconds += (len(audio) + gap) / SAMPLE_RATE
 
     # Post-process: ensure monotonic, non-overlapping, and clamp
     words = _sanitize_timings(words)
