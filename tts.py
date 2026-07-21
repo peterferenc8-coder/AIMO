@@ -235,6 +235,11 @@ def synthesize(text: str, voice: str | None = None, speed: float | None = None) 
     visemes = _build_visemes(words)
     duration_ms = round(len(audio) / SAMPLE_RATE * 1000)
 
+    # Per-phoneme durations have done their job building the track above; the
+    # frontend only highlights whole words, so keep them out of the payload.
+    for w in words:
+        w.pop("phoneme_ms", None)
+
     # -- Optional RVC voice conversion ------------------------------------
     # Re-timbres the Kokoro audio into the target voice.  RVC is
     # frame-synchronous, so duration is preserved to within a couple of ~10ms
@@ -319,7 +324,8 @@ def clear_cache() -> int:
 # Bumped whenever the shape of the cached metadata changes, so stale sidecar
 # JSON (e.g. pre-viseme entries) is never served back.  v2: added phonemes +
 # viseme track.  v3: audio may be RVC-converted, so v2 entries sound wrong.
-_META_VERSION = 4
+# v5: viseme track is aligned to the model's per-phoneme durations.
+_META_VERSION = 5
 
 
 def _rvc_enabled() -> bool:
@@ -362,6 +368,9 @@ def _extract_word_timings(results, gaps=None) -> list[dict[str, Any]]:
     *gaps* is the per-chunk trailing silence in samples that synthesize()
     spliced into the audio; it has to be walked in here too or every word
     after the first pause drifts early and the visemes desync.
+
+    Each word also carries "phoneme_ms" -- the model's own per-phoneme
+    durations, when available -- which is what _build_visemes aligns to.
     """
     words: list[dict[str, Any]] = []
     chunk_offset_seconds = 0.0
@@ -369,6 +378,7 @@ def _extract_word_timings(results, gaps=None) -> list[dict[str, Any]]:
 
     for result, gap in zip(results, gaps):
         tokens = getattr(result, "tokens", None) or []
+        token_durs = _phoneme_durations(result)
         if not tokens:
             # No token data -- fall back to chunk-duration approximation
             audio = getattr(result, "audio", None)
@@ -379,11 +389,12 @@ def _extract_word_timings(results, gaps=None) -> list[dict[str, Any]]:
 
         current_text: list[str] = []
         current_phonemes: list[str] = []
+        current_durs: list[float] = []
         current_start: float | None = None
         current_end: float | None = None
         last_end = chunk_offset_seconds
 
-        for token in tokens:
+        for index, token in enumerate(tokens):
             text = getattr(token, "text", "")
             if not text:
                 continue
@@ -396,8 +407,13 @@ def _extract_word_timings(results, gaps=None) -> list[dict[str, Any]]:
             if end_ts is not None:
                 current_end = chunk_offset_seconds + float(end_ts)
 
+            phonemes = getattr(token, "phonemes", "") or ""
             current_text.append(text)
-            current_phonemes.append(getattr(token, "phonemes", "") or "")
+            current_phonemes.append(phonemes)
+            # Durations stay 1:1 with the phoneme string, so a token the model
+            # gave us no timing for contributes zeros rather than a shift.
+            durs = token_durs[index] if index < len(token_durs) else None
+            current_durs.extend(durs if durs is not None else [0.0] * len(phonemes))
 
             # whitespace flag means this token completes a word
             if getattr(token, "whitespace", ""):
@@ -408,6 +424,7 @@ def _extract_word_timings(results, gaps=None) -> list[dict[str, Any]]:
                     words.append({
                         "word": word_text,
                         "phonemes": "".join(current_phonemes),
+                        "phoneme_ms": current_durs,
                         "start_ms": max(0, round(start * 1000)),
                         "end_ms": max(0, round(end * 1000)),
                     })
@@ -415,6 +432,7 @@ def _extract_word_timings(results, gaps=None) -> list[dict[str, Any]]:
 
                 current_text = []
                 current_phonemes = []
+                current_durs = []
                 current_start = None
                 current_end = None
 
@@ -426,6 +444,7 @@ def _extract_word_timings(results, gaps=None) -> list[dict[str, Any]]:
                 words.append({
                     "word": word_text,
                     "phonemes": "".join(current_phonemes),
+                    "phoneme_ms": current_durs,
                     "start_ms": max(0, round(start * 1000)),
                     "end_ms": max(0, round(end * 1000)),
                 })
@@ -439,6 +458,51 @@ def _extract_word_timings(results, gaps=None) -> list[dict[str, Any]]:
     # Post-process: ensure monotonic, non-overlapping, and clamp
     words = _sanitize_timings(words)
     return words
+
+
+# Kokoro's duration predictor works on a 40 Hz frame grid; kokoro's own
+# join_timestamps() counts these in half-frames over a divisor of 80.
+_FRAME_MS = 1000.0 / 40.0
+
+
+def _phoneme_durations(result) -> list[list[float] | None]:
+    """
+    Per-phoneme durations in ms for each token of *result*, or None per token
+    where the model gave us nothing.
+
+    The model predicts a duration for every phoneme, but kokoro only surfaces
+    the per-token sums as start_ts/end_ts.  The raw tensor is on the result as
+    `pred_dur`, indexed over the padded phoneme sequence: [<bos>, ...phonemes
+    of each token in order, with one slot per whitespace..., <eos>].  This walk
+    mirrors KPipeline.join_timestamps exactly -- keep the two in step.
+
+    Using these instead of dividing a word's span evenly is what makes the
+    mouth land on the same phoneme the voice is on.
+    """
+    tokens = getattr(result, "tokens", None) or []
+    out: list[list[float] | None] = [None] * len(tokens)
+
+    pred_dur = getattr(result, "pred_dur", None)
+    if pred_dur is None or len(pred_dur) < 3:
+        return out
+    frames = [int(x) for x in pred_dur]
+
+    i = 1
+    for index, token in enumerate(tokens):
+        phonemes = getattr(token, "phonemes", "") or ""
+        if not phonemes:
+            # A whitespace-only token occupies one slot, counted twice by
+            # join_timestamps so it can be split across the two words.
+            if getattr(token, "whitespace", ""):
+                i += 2
+            continue
+        j = i + len(phonemes)
+        if j >= len(frames):
+            break
+        out[index] = [f * _FRAME_MS for f in frames[i:j]]
+        i = j + (1 if getattr(token, "whitespace", "") else 0)
+
+    return out
 
 
 # -- Viseme (lip-sync) generation --------------------------------------------
@@ -466,35 +530,123 @@ _VISEME_MAP = {
     # alveolar / dental -- narrow mouth
     "l": "ih", "n": "ih", "t": "ih", "d": "ih", "s": "ih", "z": "ih",
     "θ": "ih", "ð": "ih", "j": "ih", "ɾ": "ih", "ʔ": "ih",
+    # misaki rewrites the US flap ɾ to "T" on its way out (en.py), so the
+    # letter turns up in anything like "waiting" or "better".  Unmapped it
+    # would read as a closure and shut the mouth mid-word.
+    "T": "ih",
     # velars / glottal -- slightly open
     "k": "aa", "ɡ": "aa", "ŋ": "aa", "h": "aa",
 }
 
-# Vowels hold longer than consonants; weighting the interpolation by these
-# beats an even split noticeably, for about four lines of code.
 _VOWELS = frozenset("AIOWYiuæɑɔəɛɜɪʊʌᵊᵻ")
 
 # How wide the mouth opens for each phoneme class.  Consonants at full weight
-# make the avatar look like it is chewing.
-_VOWEL_WEIGHT = 1.0
+# make the avatar look like it is chewing.  Stressed vowels open widest, which
+# is what gives the delivery its visible rhythm.
+_STRESS_WEIGHT = {"ˈ": 1.0, "ˌ": 0.8}
+_UNSTRESSED_VOWEL_WEIGHT = 0.62
+_VOWEL_WEIGHT = 1.0          # flat vowel weight, fallback path only
 _CONSONANT_WEIGHT = 0.45
 
-# Stress marks carry no mouth shape.
-_STRESS_MARKS = "ˈˌː"
+# Marks that carry no mouth shape of their own.
+_LENGTH_MARK = "ː"
 
+# Shorter than this, the mouth cannot reach the shape before the next one
+# replaces it -- attempting it reads as flutter, so fold it into its neighbour.
 MIN_VISEME_MS = 40
+
+# Kokoro folds the pause before punctuation, and each chunk's tail padding,
+# into the duration of the last phoneme before it -- so a sentence-final vowel
+# can measure over half a second.  Holding a shape that long looks like a gape;
+# cap the hold and let the rest of the span play as silence.
+MAX_VISEME_MS = 200
+
+
+def _fold_marks(phonemes: str, durs: list[float]) -> list[list[Any]]:
+    """
+    Pair each phoneme with its duration and the stress it carries, dropping
+    the marks themselves: [symbol, duration_ms, stress_weight].
+
+    Stress marks precede the syllable they apply to and a length mark follows
+    the phoneme it lengthens, so their frames are given to that neighbour
+    rather than discarded -- the timeline has to stay continuous.
+    """
+    folded: list[list[Any]] = []
+    carry = 0.0
+    stress = 0.0
+
+    for symbol, dur in zip(phonemes, durs):
+        if symbol in _STRESS_WEIGHT:
+            stress = _STRESS_WEIGHT[symbol]
+            carry += dur
+        elif symbol == _LENGTH_MARK:
+            if folded:
+                folded[-1][1] += dur
+            else:
+                carry += dur
+        else:
+            folded.append([symbol, dur + carry, stress])
+            carry = 0.0
+            if symbol in _VOWELS:
+                stress = 0.0    # the mark applies to its syllable's vowel only
+
+    if carry and folded:
+        folded[-1][1] += carry
+    return folded
+
+
+def _place_visemes(folded: list[list[Any]], start_ms: float) -> list[dict[str, Any]]:
+    """Lay a word's phonemes out end to end from *start_ms*."""
+    out: list[dict[str, Any]] = []
+    cursor = float(start_ms)
+
+    for symbol, dur, stress in folded:
+        if dur <= 0:
+            continue
+        shape = _VISEME_MAP.get(symbol, "sil")   # punctuation and unknown G2P
+        if shape == "sil":
+            out.append({"t_ms": round(cursor), "dur_ms": round(dur),
+                        "viseme": "sil", "weight": 0.0})
+        else:
+            if symbol in _VOWELS:
+                weight = stress or _UNSTRESSED_VOWEL_WEIGHT
+            else:
+                weight = _CONSONANT_WEIGHT
+            hold = min(dur, MAX_VISEME_MS)
+            out.append({"t_ms": round(cursor), "dur_ms": round(hold),
+                        "viseme": shape, "weight": round(weight, 3)})
+            if dur > hold:
+                out.append({"t_ms": round(cursor + hold), "dur_ms": round(dur - hold),
+                            "viseme": "sil", "weight": 0.0})
+        cursor += dur
+
+    return out
+
+
+def _merge_runs(visemes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse consecutive events sharing a shape into one continuous hold."""
+    out: list[dict[str, Any]] = []
+    for v in visemes:
+        if v["dur_ms"] <= 0:
+            continue
+        if out and out[-1]["viseme"] == v["viseme"]:
+            prev = out[-1]
+            prev["dur_ms"] = max(prev["dur_ms"], v["t_ms"] + v["dur_ms"] - prev["t_ms"])
+            prev["weight"] = max(prev["weight"], v["weight"])
+            continue
+        out.append(dict(v))
+    return out
 
 
 def _build_visemes(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Turn word-level phoneme strings + timings into a viseme track.
 
-    Kokoro gives us timings per *token* (usually a word), not per phoneme, so
-    each word's span is divided across its phonemes proportionally, weighting
-    vowels heavier than consonants.  This is an approximation -- exact
-    per-phoneme durations would mean reaching into the model's `pred_dur`
-    tensor -- but at conversational speed it reads correctly, because
-    neighbouring visemes blend on the client anyway.
+    Where the model gave us per-phoneme durations ("phoneme_ms") the track is
+    aligned to them directly, so the mouth is on the same phoneme as the voice
+    rather than on a proportional guess at it.  Words without them -- a chunk
+    the model returned no `pred_dur` for -- fall back to dividing the word's
+    span across its phonemes, vowels weighted heavier than consonants.
 
     Returns a list of {"t_ms", "dur_ms", "viseme", "weight"} ordered by time.
     """
@@ -502,40 +654,27 @@ def _build_visemes(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     for w in words:
         phonemes = w.get("phonemes") or ""
+        durs = w.get("phoneme_ms") or []
         start_ms = w["start_ms"]
-        end_ms = w["end_ms"]
-        span = max(0, end_ms - start_ms)
+        span = max(0, w["end_ms"] - start_ms)
 
-        # Strip stress/length marks, then keep only symbols we can render.
-        symbols = [c for c in phonemes if c not in _STRESS_MARKS]
-        symbols = [c for c in symbols if c in _VISEME_MAP]
+        timed = len(durs) == len(phonemes) and sum(durs) > 0
+        folded = _fold_marks(phonemes, durs if timed else [0.0] * len(phonemes))
 
-        if not symbols or span <= 0:
+        if not folded or (not timed and span <= 0):
             # Punctuation, silence, or a word with no usable G2P -- close up.
-            visemes.append({
-                "t_ms": start_ms,
-                "dur_ms": span,
-                "viseme": "sil",
-                "weight": 0.0,
-            })
+            visemes.append({"t_ms": start_ms, "dur_ms": span,
+                            "viseme": "sil", "weight": 0.0})
             continue
 
-        weights = [
-            _VOWEL_WEIGHT if c in _VOWELS else _CONSONANT_WEIGHT
-            for c in symbols
-        ]
-        total = sum(weights)
+        if not timed:
+            shares = [_VOWEL_WEIGHT if s in _VOWELS else _CONSONANT_WEIGHT
+                      for s, _, _ in folded]
+            total = sum(shares)
+            for entry, share in zip(folded, shares):
+                entry[1] = span * share / total
 
-        cursor = float(start_ms)
-        for symbol, weight in zip(symbols, weights):
-            dur = span * (weight / total)
-            visemes.append({
-                "t_ms": round(cursor),
-                "dur_ms": round(dur),
-                "viseme": _VISEME_MAP[symbol],
-                "weight": round(weight, 3),
-            })
-            cursor += dur
+        visemes.extend(_place_visemes(folded, start_ms))
 
     # Close the mouth after the final phoneme so it does not hang open.
     if visemes:
@@ -547,7 +686,19 @@ def _build_visemes(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "weight": 0.0,
         })
 
-    return visemes
+    # Drop shapes the mouth has no time to reach, extending whatever precedes
+    # them.  Silences are kept however brief: a bilabial closure is short by
+    # nature and it is the cue that sells the whole track.
+    visemes = _merge_runs(visemes)
+    kept: list[dict[str, Any]] = []
+    for v in visemes:
+        if v["viseme"] != "sil" and v["dur_ms"] < MIN_VISEME_MS and kept:
+            prev = kept[-1]
+            prev["dur_ms"] = v["t_ms"] + v["dur_ms"] - prev["t_ms"]
+            continue
+        kept.append(v)
+
+    return _merge_runs(kept)
 
 
 def _sanitize_timings(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -581,6 +732,7 @@ def _sanitize_timings(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out.append({
             "word": w["word"],
             "phonemes": w.get("phonemes", ""),
+            "phoneme_ms": w.get("phoneme_ms", []),
             "start_ms": start,
             "end_ms": end,
         })
