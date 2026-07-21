@@ -22,10 +22,18 @@ const VISEME_GAIN = 0.75;
 // Fcl_MTH_U open far wider than the rest at the same weight, so one flat gain
 // leaves "aa"/"ou" gaping while "ih"/"ee" barely register.
 const VISEME_SCALE = { aa: 0.55, ih: 0.95, ou: 0.55, ee: 0.9, oh: 0.8 };
-// Easing time constant, seconds. MUST stay well under a typical phoneme
+// Easing time constants, seconds. All MUST stay well under a typical phoneme
 // (30-100ms) or the mouth never reaches a shape before the next replaces it
 // and the avatar reads as motionless.
-const VISEME_TAU = 0.025;
+//
+// Real mouths open faster than they close, so the attack is the quickest of
+// the three. A closure ('sil' mid-utterance — a /p/, /b/, /m/, or the pause
+// before punctuation) still has to be crisp to read as a closure at all, so it
+// gets its own constant rather than the slow settle used when nothing is being
+// said and the face is simply returning to rest.
+const VISEME_TAU_OPEN = 0.018;
+const VISEME_TAU_CLOSE = 0.030;
+const VISEME_TAU_REST = 0.060;
 
 const MODEL_YAW = Math.PI;   // turn the model to face the camera
 
@@ -196,12 +204,15 @@ class Avatar {
   _updateViseme(dt) {
     const em = this.vrm.expressionManager; if (!em) return;
     const active = this._activeViseme();
-    const k = 1 - Math.exp(-dt / VISEME_TAU);
+    // Off the end of the track (or between utterances) the face settles back
+    // slowly; while speaking, shapes are driven at articulation speed.
+    const closeTau = active ? VISEME_TAU_CLOSE : VISEME_TAU_REST;
     for (const name of VISEME_NAMES) {
       // A 'sil' (closed) viseme matches no name, so all five fall to zero.
       const goal = (active && active.viseme === name)
         ? active.weight * VISEME_GAIN * VISEME_SCALE[name] : 0;
-      this.weights[name] += (goal - this.weights[name]) * k;
+      const tau = goal > this.weights[name] ? VISEME_TAU_OPEN : closeTau;
+      this.weights[name] += (goal - this.weights[name]) * (1 - Math.exp(-dt / tau));
       em.setValue(name, this.weights[name]);
     }
   }
