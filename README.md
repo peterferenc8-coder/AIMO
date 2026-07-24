@@ -1,12 +1,14 @@
 # AIMO — AI Session Orchestrator ("Aimee")
 
 AIMO is a Flask web application that drives interactive hardware (an **OSSM** linear
-actuator or a **DG-Lab Coyote 3.0** e-stim unit) from an AI persona. A large language
-model (Google Gemini/Gemma or Groq-hosted models) generates a running stream of
-*turns* — each turn is a line of speech plus a narrative **intent** and an
-**intensity**. The orchestrator translates those intents into concrete device motion,
-optionally speaks the text with local **Kokoro TTS**, and can cut to interactive video
-clips streamed from a **Stash** media server (whose funscripts drive the device).
+actuator, a **DG-Lab Coyote 3.0** e-stim unit, or any toy exposed through
+**Buttplug/Intiface**) from an AI persona. A large language model (Google Gemini/Gemma
+or Groq-hosted models) generates a running stream of *turns* — each turn is a line of
+speech plus a narrative **intent** and an **intensity**. The orchestrator translates
+those intents into concrete device motion, optionally speaks the text with local
+**Kokoro TTS** (re-timbred by an **RVC** voice-conversion pass and lip-synced onto a
+**VRM avatar**), and can cut to interactive video clips streamed from a **Stash** media
+server (whose funscripts drive the device).
 
 The browser UI is a tabbed control panel; all state lives in memory for the lifetime
 of the Flask process.
@@ -30,6 +32,8 @@ of the Flask process.
   - [Stash integration](#stash-integration)
   - [Funscript player](#funscript-player)
   - [Text-to-speech](#text-to-speech)
+  - [RVC voice conversion](#rvc-voice-conversion)
+  - [Speaking avatar](#speaking-avatar)
 - [Settings](#settings)
 - [Prompt storage](#prompt-storage)
 - [Authoring intents and patterns](#authoring-intents-and-patterns)
@@ -45,10 +49,12 @@ of the Flask process.
 - **AI-generated sessions** — a persona produces speech + intent + intensity per turn, paced and de-duplicated to avoid repetition.
 - **Two AI back ends** — Google Generative AI (Gemini/Gemma) and Groq's OpenAI-compatible API, switchable per session.
 - **Intent → motion compiler** — narrative intents (`tease`, `build`, `reward`, `settle`, `stop`) plus a 0.0–1.0 intensity are compiled to concrete device commands via per-intent JSON "bands" with weighted random variations.
-- **Multiple devices** — OSSM (WebSocket or serial) and Coyote 3.0 (BLE), behind a common device abstraction with a live state stream.
+- **Multiple devices** — OSSM (WebSocket or serial), Coyote 3.0 (BLE), and Buttplug/Intiface toys, behind a common device abstraction with a live state stream.
 - **Stash media server** — pull random tagged scenes, proxy their video through Flask (keeping the API key server-side), and drive the device from each scene's funscript. Optional SOCKS5 tunnelling.
 - **Funscript playback** — upload/load `.funscript` files or play scene funscripts, with seek/pause/resume and latency/invert tuning.
-- **Local TTS** — Kokoro synthesizes speech with word-level timing so the UI highlights each word as it is spoken.
+- **Local TTS** — Kokoro synthesizes speech with word-level timing so the UI highlights each word as it is spoken, plus a phoneme-aligned viseme track.
+- **Custom voice (RVC)** — an optional frame-synchronous voice-conversion pass re-timbres Kokoro's output into a trained target voice without changing its duration, so word timings and lip-sync stay valid.
+- **Speaking avatar** — a VRM model on the AI tab breathes, blinks and lip-syncs to each spoken line, driven by the viseme track off the audio element's own clock.
 - **Live feedback** — like / love / dislike / ban any displayed line; reactions are fed back into the prompt to steer the AI, and bans persist across sessions so a banned line is never spoken again.
 - **Fully settable runtime config** — generation params, pacing/buffering, timeouts, TTS voice, device limits, and more, all editable from the Settings tab with a global save and per-service connectivity tests.
 - **Built-in emulators** — a standalone OSSM firmware emulator and a one-click serial (PTY) emulator for development without hardware.
@@ -121,6 +127,12 @@ pip install -r requirements-tts.txt
 Optionally install a smaller CPU-only PyTorch first with
 `pip install torch --index-url https://download.pytorch.org/whl/cpu`. Kokoro downloads its
 voice model from Hugging Face on first synthesis, so initial TTS needs an internet connection.
+
+Two further pieces are optional and degrade gracefully when absent:
+[**RVC voice conversion**](#rvc-voice-conversion) needs an Applio checkout with its own
+virtualenv under `RVC/` (without it, you get plain Kokoro audio), and the
+[**speaking avatar**](#speaking-avatar) needs a VRM model at `static/models/avatar.glb`
+(without it, the avatar panel stays empty).
 
 To set up an AI back end, open the **Settings** tab, paste a Google and/or Groq API key,
 **Save All**, then press **Test Connection**. Once a key validates, its models unlock for
@@ -198,10 +210,11 @@ Key modules:
 | `intent_compiler.py` | Map `(intent, intensity)` → concrete device command. |
 | `session_manager.py` | In-memory turn history + effective device state. |
 | `feedback_store.py` | Persistent banned-phrase store for cross-session feedback (🚫). |
-| `devices/` | Device abstraction (`base`), implementations (`ossm`, `coyote_ble`), and a `registry` singleton. |
+| `devices/` | Device abstraction (`base`), implementations (`ossm`, `coyote_ble`, `buttplug`), the host-side `stroke_patterns` engine, and a `registry` singleton. |
 | `stash_client.py` | GraphQL + media accessor for a Stash server, with stdlib SOCKS5 support. |
 | `funscript_player.py` | Schedules funscript actions and streams positions to the device. |
-| `tts.py` | Kokoro TTS with word-level timing and an on-disk cache. |
+| `tts.py` | Kokoro TTS with word-level timing, a viseme track, and an on-disk cache. |
+| `rvc_client.py` / `rvc_worker.py` | Persistent RVC voice-conversion worker (own venv, subprocess) and its client. |
 | `settings_store.py` | Load/normalize/save the local settings file (the single source of truth for runtime config). |
 
 ### The two-loop orchestrator
@@ -298,6 +311,9 @@ swaps implementations on request.
 
 - **`OSSMDevice`** — connects over **WebSocket** (default `ws://localhost:8888`) or **serial** (auto-detected from a `/dev/…`, `COM…`, `tty…`, or `/tmp/…` address). It reconnects with exponential backoff and forwards raw position messages to listeners. A standalone `device_emulator.py` and a one-click serial-PTY emulator (`socat` + emulator) allow development without hardware.
 - **`CoyoteBLE`** — direct BLE control of a DG-Lab Coyote 3.0 via `bleak`, implementing the V3 protocol. Channel strengths are clamped to configurable **soft limits**, and BLE name / frequency / limits are taken from settings (and pushed live to a connected device when saved).
+- **`ButtplugDevice`** — speaks the Buttplug v3 wire protocol to **Intiface Central** (default `ws://127.0.0.1:12345`) over the `websockets` dependency the app already has, so no vendor-specific code and no extra package. Intiface does its own scanning; the app pushes the resulting toy list to the Setup tab (`GET /api/device/buttplug/devices`, `POST /api/device/buttplug/select`).
+
+  Everything funnels through a single position signal (0 = out, 100 = in), sourced either from the funscript player / manual `moveTo` (**stream mode**) or from the AI session's `(pattern, speed, depth, base, intensity)` (**pattern mode**). Because Buttplug toys have no on-board stroke engine — unlike the OSSM board, whose firmware renders patterns itself — `devices/stroke_patterns.py` is a percent-space port of the firmware's `pattern.h`, so the same seven patterns feel the same on a Handy as on OSSM. That signal then fans out to whatever the toy actually has: linear axes get sparse `LinearCmd`s with a duration to interpolate over, vibrators get a continuous scalar. Motors take 50–100 ms to spin up, so `buttplug_vibe_floor` raises the minimum non-zero vibration to keep fast pulses distinct.
 
 ### Stash integration
 
@@ -323,10 +339,75 @@ and the interpolated current position, and has runtime `latency_ms` and `invert`
 ### Text-to-speech
 
 `tts.py` wraps [Kokoro](https://github.com/hexgrad/kokoro). `synthesize()` returns an
-audio URL plus **word-level timings** (start/end ms per word) so the UI can highlight
-each word as it plays, and caches results on disk keyed by text+voice+speed. Voice,
-speed, and device (`auto`/`cpu`/`cuda`) come from settings via `tts.configure()`; Kokoro
-and `soundfile` are imported lazily so the app starts even when TTS isn't installed.
+audio URL plus two timing tracks, and caches results on disk keyed by text+voice+speed
+(the cache is versioned, so entries predating a track or the RVC pass are never served
+back):
+
+- **Word timings** — start/end ms per word, so the UI highlights each word as it is spoken.
+- **Visemes** — `{t_ms, dur_ms, viseme, weight}` events aligned to the model's own
+  per-phoneme durations, folded from misaki's G2P symbols onto the five VRM mouth shapes
+  (`aa`/`ih`/`ou`/`ee`/`oh`) plus `sil`. This drives the avatar's mouth.
+
+Voice, speed, and device (`auto`/`cpu`/`cuda`) come from settings via `tts.configure()`;
+Kokoro and `soundfile` are imported lazily so the app starts even when TTS isn't
+installed. The default voice is a **weighted style-vector blend** (75 % `af_bella` /
+25 % `af_nicole`) baked into `RVC/voices/bella75_nicole25.pt` — Kokoro's comma syntax
+only averages voices evenly, so an uneven mix has to be saved to a `.pt`, which
+`load_single_voice()` accepts by path. At speed `0.85` this gives the slower, breathier
+delivery the RVC pass expects. Without that file present, the default falls back to
+plain `af_heart`.
+
+### RVC voice conversion
+
+Kokoro fixes *what* is said and *when*; RVC fixes *who* it sounds like.
+`rvc_client.py` runs the converted-timbre pass over each utterance before it is served.
+
+The important property is that RVC is **frame-synchronous** — one input frame maps to
+one output frame, so converted audio has the same duration as its input (within a couple
+of ~10 ms frames). That is what lets `tts.py` keep Kokoro's word timings and viseme track
+untouched instead of realigning them; any pass that changed length would desync both the
+word highlight and the avatar's mouth.
+
+[Applio](https://github.com/IAHispano/Applio) needs its own virtualenv (numpy 2.x,
+`faiss`, `torchcrepe`) that cannot be merged with this app's, so conversion happens in a
+**persistent worker subprocess** (`rvc_worker.py`) driven over line-delimited JSON on
+stdin/stdout. It is long-lived rather than one CLI call per line because a fresh
+invocation costs ~17 s of interpreter start plus model load, and Applio rebuilds and
+discards the RMVPE pitch predictor on *every* conversion (~2.0–2.3 s). Hoisting both
+takes a short utterance from ~2.4 s to ~0.2–0.4 s.
+
+Failure is non-fatal: if RVC is unavailable, fails to start, or errors on a line, the
+caller falls back to plain Kokoro audio rather than losing speech.
+
+> The client module must be named `rvc_client.py`, **not** `rvc.py` — Applio's own
+> top-level package is called `rvc` and ships without an `__init__.py`, so a module named
+> `rvc.py` anywhere on `sys.path` silently wins that import and breaks the worker.
+
+RVC is configured from `config.py` / the settings file only (there is no Settings-tab
+card): `rvc_enabled`, `rvc_pitch` (clamped to ±6 semitones), `rvc_index_rate`, plus the
+`RVC_APPLIO_DIR` / `RVC_PYTHON` / `RVC_MODEL` / `RVC_INDEX` paths. It is disabled in
+effect when those paths don't exist.
+
+### Speaking avatar
+
+The AI tab renders a [VRM](https://vrm.dev/) model via vendored **three.js** and
+**three-vrm** (`static/vendor/`, wired up with an importmap in `index.html`).
+`static/js/avatar.js` loads as an ES module and publishes `window.Avatar` for `ai.js` to
+drive with `speak(visemes, clockFn)` / `stopSpeaking()`.
+
+The mouth is driven from the viseme track, but sampled against **the audio element's own
+`currentTime`** rather than a wall clock — so pausing, resuming, or a stalled buffer
+never drifts the lip-sync. Between lines the avatar has idle life: breathing, blinking,
+looking around, and a gentle sway. Viseme weights are eased with time constants well
+under a typical phoneme (30–100 ms), otherwise the mouth never reaches a shape before the
+next one replaces it and the avatar reads as motionless.
+
+The model itself is **not committed** — VRM files carry licence terms in their metadata
+and VRoid Hub models are commonly `redistribution=disallow`. Drop your own at
+`static/models/avatar.glb`; see [`static/models/README.md`](static/models/README.md) for
+how to read a model's licence and for the per-model mouth-openness tuning knobs
+(`VISEME_GAIN`, `VISEME_SCALE`). Without a model the avatar panel simply stays empty and
+everything else works.
 
 ---
 
@@ -348,8 +429,12 @@ Settings categories: **Google AI**, **Groq AI**, **Generation** (temperature, to
 top-k, timeouts, retries), **Session & Pacing** (turns, watermarks,
 display interval, generator sleep, banned-phrase window), **Text-to-Speech** (enable,
 voice, speed, device), **Stash** (enable + interlude chance, URL, key, tag, SOCKS5),
-**Device** (default WS URL, Coyote BLE name + soft limits + frequency), and **Prompt
-Files**.
+**Device** (default WS URL, Coyote BLE name + soft limits + frequency, Intiface
+WebSocket URL + vibration floor), and **Prompt Files**.
+
+RVC settings (`rvc_enabled`, `rvc_pitch`, `rvc_index_rate`) are normalized and persisted
+like everything else but have no Settings-tab card — edit them in the settings file or
+via environment variables.
 
 ---
 
@@ -436,6 +521,7 @@ Selected endpoints (see `routes.py` for the full set):
 | `POST` | `/api/device/command` | Send a raw command dict. |
 | `POST` | `/api/device/serial_emulator/start` · `/stop` | Local PTY + emulator. |
 | `GET` / `POST` | `/api/coyote/scan` · `/api/coyote/command` | Coyote BLE scan / command. |
+| `GET` / `POST` | `/api/device/buttplug/devices` · `/select` | List Intiface toys / choose the active one. |
 
 **Media**
 | Method | Path | Purpose |
@@ -445,8 +531,9 @@ Selected endpoints (see `routes.py` for the full set):
 | `GET`  | `/api/stash/video/<id>` | Proxy a scene's video stream (Range-aware). |
 | `POST` | `/api/funscript/upload` · `/play` · `/load` · `/start` · `/pause` · `/resume` · `/seek` · `/stop` | Funscript playback. |
 | `GET`  | `/api/funscript/status` · `/list` · `/videos` | Player status / file lists. |
-| `POST` | `/api/tts/synthesize` · `/clear` | TTS synth / cache clear. |
-| `GET`  | `/api/tts/audio/<key>` | Fetch cached audio. |
+| `POST` | `/api/tts/synthesize` · `/clear` | TTS synth (audio + word timings + visemes) / cache clear. |
+| `GET`  | `/api/tts/audio/<key>` · `/api/tts/cache` | Fetch cached audio / inspect the cache. |
+| `GET` / `POST` | `/api/custom_patterns` · `/api/custom_patterns/<name>` | List / read / save user patterns. |
 
 ---
 
@@ -471,7 +558,9 @@ AIMO/
 ├── feedback_store.py       # Persistent banned-phrase store (cross-session feedback)
 ├── stash_client.py         # Stash GraphQL/media client (+ stdlib SOCKS5)
 ├── funscript_player.py     # Funscript scheduling/playback
-├── tts.py                  # Kokoro TTS with word timing + cache
+├── tts.py                  # Kokoro TTS with word timing + visemes + cache
+├── rvc_client.py           # Client for the RVC worker (must NOT be named rvc.py)
+├── rvc_worker.py           # Persistent RVC voice-conversion worker (Applio venv)
 ├── device_bridge.py        # Legacy accessor → registry singleton
 ├── device_emulator.py      # Standalone OSSM firmware emulator
 ├── heart_rate_sensor.py    # Standalone BLE heart-rate experiment (not wired into the app)
@@ -479,12 +568,18 @@ AIMO/
 │   ├── base.py             # AbstractDevice + DeviceState
 │   ├── ossm.py             # OSSM (WebSocket / serial)
 │   ├── coyote_ble.py       # Coyote 3.0 (BLE)
+│   ├── buttplug.py         # Buttplug v3 client → Intiface Central
+│   ├── stroke_patterns.py  # Percent-space port of the OSSM firmware patterns
 │   └── registry.py         # Active-device factory/singleton
 ├── intents/                # <intent>/<intensity-band>.json
 ├── patterns/               # Motion patterns + custom/ and funscripts/ + videos/
 ├── prompts/{base,current,catalog}/
 ├── templates/              # index.html + tab_*.html partials
-├── static/{css,js}/        # UI styles and per-tab scripts
+├── static/
+│   ├── css/, js/           # UI styles and per-tab scripts (incl. avatar.js)
+│   ├── vendor/             # Vendored three.js + three-vrm
+│   └── models/             # avatar.glb goes here (not committed — see its README)
+├── RVC/                    # Applio checkout, trained voice model, blended voices
 └── logs/                   # API response logs
 ```
 
@@ -505,7 +600,11 @@ editable at runtime from the Settings tab (which persists to
 | `DEFAULT_TURNS` | Default session length | `5` |
 | `BANNED_PHRASE_WINDOW` | Recent lines fed back as "do not repeat" | `20` |
 | `VIDEO_CHANCE` | Per-turn chance of a video interlude | `0.10` |
-| `KOKORO_VOICE` / `KOKORO_SPEED` / `KOKORO_DEVICE` | TTS voice / speed / device | `af_heart` / `1.0` / `auto` |
+| `KOKORO_VOICE` / `KOKORO_SPEED` / `KOKORO_DEVICE` | TTS voice / speed / device | blended `.pt` if present, else `af_heart` / `0.85` / `auto` |
+| `RVC_ENABLED` | Run the RVC timbre pass after Kokoro | `true` |
+| `RVC_APPLIO_DIR` / `RVC_PYTHON` | Applio checkout and its venv interpreter | `RVC/Applio` / `RVC/Applio/.venv/bin/python` |
+| `RVC_MODEL` / `RVC_INDEX` | Trained voice model + FAISS index | `RVC/lux/lux_300e_4800s.pth` / `RVC/lux/lux.index` |
+| `RVC_PITCH` / `RVC_INDEX_RATE` / `RVC_PROTECT` | Semitone shift (±6) / index blend / consonant protect | `0` / `0.7` / `0.33` |
 | `STASH_URL` / `STASH_API_KEY` / `STASH_TAG` | Stash server, key, playable tag | `""` / `""` / `playable` |
 | `STASH_VIDEO_ENABLED` | Allow video interludes | `true` |
 | `STASH_PROXY_ENABLED` / `STASH_PROXY_ADDRESS` | SOCKS5 tunnel | `false` / `""` |
@@ -513,6 +612,8 @@ editable at runtime from the Settings tab (which persists to
 | `COYOTE_BLE_NAME` | Coyote BLE advertised name | `47L121000` |
 | `COYOTE_SOFT_LIMIT_A` / `_B` | Channel strength caps | `100` / `100` |
 | `COYOTE_DEFAULT_FREQ_MS` | Coyote pulse frequency (ms) | `100` |
+| `BUTTPLUG_WS_URL` | Intiface Central WebSocket server | `ws://127.0.0.1:12345` |
+| `BUTTPLUG_VIBE_FLOOR` | Minimum vibration for a non-zero position (0–0.9) | `0.0` |
 | `FLASK_HOST` / `FLASK_PORT` / `FLASK_DEBUG` | Server bind/port/debug | `0.0.0.0` / `5000` / `true` |
 | `LOG_LEVEL` | Root log level | `INFO` |
 
@@ -540,6 +641,14 @@ instance, reports as unavailable in the prebuilt binary). A few more extras rema
 install-as-needed:
 
 - **Groq** — none beyond the stdlib (uses `urllib`).
+- **Buttplug/Intiface** — none beyond `websockets` (already core); needs
+  [Intiface Central](https://intiface.com/central/) running with its server enabled.
+- **RVC voice conversion** — an [Applio](https://github.com/IAHispano/Applio) checkout
+  under `RVC/` **with its own virtualenv**, deliberately never merged into this app's
+  environment (it needs numpy 2.x, `faiss`, `torchcrepe`). Absent or broken, TTS silently
+  falls back to plain Kokoro audio.
+- **Speaking avatar** — no Python dependency; three.js and three-vrm are vendored under
+  `static/vendor/`. Supply your own `static/models/avatar.glb`.
 - **Heart-rate sensor** — `pynput` (for the standalone heart-rate experiment).
 - **Serial emulator** — the `socat` system package (Linux/macOS; used by the one-click
   PTY emulator on the Setup tab).
