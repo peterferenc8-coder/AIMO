@@ -301,13 +301,22 @@ class SessionOrchestrator:
 
         Display items are built before the lock is taken: _build_display_item
         can hit Stash to resolve a clip, which must not block the display loop.
+
+        Each item is published as soon as it is built rather than the batch
+        landing at once.  A batch is HIGH_WATERMARK turns and every one of them
+        costs a TTS synthesis plus a voice conversion, so holding them back
+        makes the first line wait on the tenth -- around 15s, all of it in the
+        /api/start request at the top of a session.  Publishing incrementally
+        lets the display loop start on the first turn while the rest are still
+        being spoken.
         """
         self.brain.record_turns(compiled_turns)
         self.session.add_turns(compiled_turns)
 
-        display_items = [self._build_display_item(t) for t in compiled_turns]
-        with self.lock:
-            self._pending.extend(display_items)
+        for turn in compiled_turns:
+            item = self._build_display_item(turn)
+            with self.lock:
+                self._pending.append(item)
 
     def start(
         self,
@@ -528,8 +537,9 @@ class SessionOrchestrator:
         Steady clock: pop one item from the buffer every DISPLAY_INTERVAL seconds.
         Applies device commands and records the display.
 
-        TTS synthesis happens here so that audio generation time does NOT
-        block the producer (model generation) or the poll() endpoint.
+        Items arrive already synthesised -- _enqueue_turns does the TTS on the
+        producer thread and publishes each one as it lands -- so this loop only
+        ever pops, and never blocks the poll() endpoint on audio generation.
 
         Bound to ``epoch``: exits the moment a newer session starts, so a thread
         left mid-sleep by a stop/restart can't keep draining the buffer.
