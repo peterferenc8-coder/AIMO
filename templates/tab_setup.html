@@ -5,16 +5,27 @@
     <div class="connection-bar device-selector">
       <label for="device-type-select">Device Type</label>
       <select id="device-type-select">
+        <option value="none">No Toy (software only)</option>
         <option value="ossm">OSSM (Linear Actuator)</option>
         <option value="coyote">DG-Lab Coyote 3.0 (E-Stim BLE)</option>
         <option value="buttplug">Buttplug / Intiface</option>
       </select>
       <button class="btn" id="device-type-set">Set Device</button>
-      <span id="device-type-status" class="conn-status">OSSM</span>
+      <span id="device-type-status" class="conn-status">NONE</span>
+    </div>
+
+    <!-- No Toy: nothing to connect, so every tab is open from the start -->
+    <div id="setup-none-panel" class="device-panel">
+      <div class="device-info">
+        <p>No toy selected. Every tab is unlocked and nothing is driven —
+           patterns, AI sessions and funscripts all run on screen only.</p>
+        <p>Pick a device above and press Set Device when you want to connect
+           real hardware.</p>
+      </div>
     </div>
 
     <!-- OSSM Connection -->
-    <div id="setup-ossm-panel" class="device-panel">
+    <div id="setup-ossm-panel" class="device-panel" style="display:none;">
       <div class="connection-bar">
         <label for="device-url">Device URL</label>
         <input type="text" id="device-url" value="ws://localhost:8888" />

@@ -10,10 +10,11 @@ from devices.registry import get_active_device
 
 
 def get_bridge():
-    """Legacy singleton accessor. Returns the currently active device (usually OSSM)."""
+    """Legacy singleton accessor. Returns the currently active device."""
     dev = get_active_device()
     if dev is None:
-        # Fallback: lazy-init OSSM if registry hasn't been set up yet
+        # Fallback: lazy-init the no-op device if the registry hasn't been set
+        # up yet, so nothing moves before the user has chosen a toy.
         from devices.registry import set_active_device
-        dev = set_active_device("ossm")
+        dev = set_active_device("none")
     return dev

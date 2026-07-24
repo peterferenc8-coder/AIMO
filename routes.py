@@ -371,7 +371,7 @@ def register_routes(app: Flask) -> None:
     @app.post("/api/device/set")
     def api_device_set():
         body = request.get_json(silent=True) or {}
-        device_type = body.get("type", "ossm")
+        device_type = body.get("type", "none")
         try:
             dev = set_active_device(device_type)
             return jsonify({"ok": True, "type": device_type, "name": dev.name})
