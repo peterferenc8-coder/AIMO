@@ -27,9 +27,10 @@ def create_app() -> Flask:
         static_folder=str(STATIC_DIR),
     )
     register_routes(app)
-    # Initialize default device on startup
+    # Initialize default device on startup. "none" so the app is usable before
+    # any toy is paired; the user picks real hardware on the Setup tab.
     try:
-        set_active_device("ossm")
+        set_active_device("none")
     except Exception as exc:
         logging.getLogger(__name__).warning("Failed to initialize default device: %s", exc)
     return app

@@ -99,10 +99,24 @@ function updateAllGauges(data) {
 // devices without a homing step (Coyote, Intiface) unlock on connect instead.
 // Keep this the single list: it previously drifted, leaving Funscript locked
 // for anything that never homes.
+const DEVICE_TABS = ['manual', 'ai', 'custom', 'funscript'];
+
 function unlockDeviceTabs() {
-  ['manual', 'ai', 'custom', 'funscript'].forEach(tab => {
+  DEVICE_TABS.forEach(tab => {
     const btn = $(`tab-btn-${tab}`);
     if (btn && btn.disabled) btn.disabled = false;
+  });
+}
+
+// Put the gate back when the user switches to real hardware that has not been
+// connected (or homed) yet. Anyone standing on a locked tab is walked back to
+// Setup, since that is where the work to reopen it happens.
+function lockDeviceTabs() {
+  DEVICE_TABS.forEach(tab => {
+    const btn = $(`tab-btn-${tab}`);
+    if (!btn) return;
+    btn.disabled = true;
+    if (btn.classList.contains('active')) $('tab-btn-setup').click();
   });
 }
 
@@ -161,4 +175,4 @@ const errorBannerClose = $('error-banner-close');
 if (errorBannerClose) errorBannerClose.addEventListener('click', hideError);
 
 // ── Expose globals ─────────────────────────────────────────────────────────
-window.App = { showError, showInfo, hideError, setDeviceStatus, openDeviceStream, closeDeviceStream, sendDeviceCmd, unlockDeviceTabs };
+window.App = { showError, showInfo, hideError, setDeviceStatus, openDeviceStream, closeDeviceStream, sendDeviceCmd, unlockDeviceTabs, lockDeviceTabs };

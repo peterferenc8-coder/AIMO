@@ -1,6 +1,6 @@
 /* manual.js */
 
-let currentManualDevice = 'ossm';
+let currentManualDevice = 'none';
 
 // ── OSSM Elements ───────────────────────────────────────────────────────────
 
@@ -32,7 +32,7 @@ const manualCoyotePanel = document.getElementById('manual-coyote-panel');
 // ── Device Type Listener ──────────────────────────────────────────────────
 
 window.addEventListener('device-type-changed', (e) => {
-  currentManualDevice = e.detail || 'ossm';
+  currentManualDevice = e.detail || 'none';
   updateManualPanels();
 });
 
@@ -41,7 +41,7 @@ async function syncManualDeviceType() {
     const res = await fetch('/api/device/types');
     const data = await res.json();
     if (data.ok) {
-      currentManualDevice = data.active || 'ossm';
+      currentManualDevice = data.active || 'none';
       updateManualPanels();
     }
   } catch (err) {
@@ -50,7 +50,9 @@ async function syncManualDeviceType() {
 }
 
 function updateManualPanels() {
-  if (currentManualDevice === 'ossm') {
+  // "No Toy" borrows the stroke controls: they drive the on-screen gauge and
+  // the pattern engine, they just have nothing to move.
+  if (currentManualDevice === 'ossm' || currentManualDevice === 'none') {
     if (manualOssmPanel) manualOssmPanel.style.display = '';
     if (manualCoyotePanel) manualCoyotePanel.style.display = 'none';
   } else {

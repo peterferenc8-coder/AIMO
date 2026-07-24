@@ -1,6 +1,6 @@
 /* setup.js */
 
-let currentDeviceType = 'ossm';
+let currentDeviceType = 'none';
 
 function setSetupStep(step) {
   for (let i = 1; i <= 3; i++) {
@@ -36,12 +36,14 @@ async function waitForEngineReady(timeoutMs = 8000) {
 const deviceTypeSelect = document.getElementById('device-type-select');
 const deviceTypeSetBtn = document.getElementById('device-type-set');
 const deviceTypeStatus = document.getElementById('device-type-status');
+const nonePanel = document.getElementById('setup-none-panel');
 const ossmPanel = document.getElementById('setup-ossm-panel');
 const coyotePanel = document.getElementById('setup-coyote-panel');
 const buttplugPanel = document.getElementById('setup-buttplug-panel');
 const setupPanelTitle = document.getElementById('setup-panel-title');
 
 const DEVICE_PANELS = {
+  none: { panel: nonePanel, title: 'Position' },
   ossm: { panel: ossmPanel, title: 'Position' },
   coyote: { panel: coyotePanel, title: 'Coyote Status' },
   buttplug: { panel: buttplugPanel, title: 'Position' },
@@ -52,7 +54,7 @@ async function loadDeviceType() {
     const res = await fetch('/api/device/types');
     const data = await res.json();
     if (data.ok) {
-      currentDeviceType = data.active || 'ossm';
+      currentDeviceType = data.active || 'none';
       deviceTypeSelect.value = currentDeviceType;
       deviceTypeStatus.textContent = currentDeviceType.toUpperCase();
       updateDevicePanels();
@@ -63,7 +65,7 @@ async function loadDeviceType() {
 }
 
 function updateDevicePanels() {
-  const active = DEVICE_PANELS[currentDeviceType] || DEVICE_PANELS.ossm;
+  const active = DEVICE_PANELS[currentDeviceType] || DEVICE_PANELS.none;
   Object.values(DEVICE_PANELS).forEach(({ panel }) => {
     if (panel) panel.style.display = 'none';
   });
@@ -71,6 +73,14 @@ function updateDevicePanels() {
   setupPanelTitle.textContent = active.title;
 
   if (currentDeviceType === 'buttplug') refreshButtplugDevices();
+  // Nothing to connect or home without a toy, so hold nothing back. The stream
+  // still runs: the driver echoes positions back so the gauge follows a
+  // funscript or a pattern on screen.
+  if (currentDeviceType === 'none') {
+    markSetupComplete();
+    window.App.unlockDeviceTabs();
+    window.App.openDeviceStream();
+  }
 }
 
 deviceTypeSetBtn.addEventListener('click', async () => {
@@ -85,6 +95,15 @@ deviceTypeSetBtn.addEventListener('click', async () => {
     if (data.ok) {
       currentDeviceType = type;
       deviceTypeStatus.textContent = type.toUpperCase();
+      // Real hardware starts disconnected, so gate the driving tabs again
+      // until it connects (and, for OSSM, homes). updateDevicePanels reopens
+      // them immediately for "none".
+      if (type !== 'none') {
+        window.App.closeDeviceStream();
+        window.App.setDeviceStatus(false);
+        window.App.lockDeviceTabs();
+        setSetupStep(1);
+      }
       updateDevicePanels();
       window.App.showInfo(`Switched to ${data.name}`);
       // Refresh manual tab visibility
