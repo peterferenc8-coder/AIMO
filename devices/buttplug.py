@@ -67,6 +67,7 @@ POSITION_EMIT_INTERVAL = 0.1    # throttle UI/SSE updates to 10Hz
 
 RECONNECT_DELAY_INITIAL = 1.0
 RECONNECT_DELAY_MAX = 30.0
+HANDSHAKE_TIMEOUT = 5.0
 
 # Scalar actuators that should follow the stroke signal. Constrict/Inflate are
 # deliberately excluded: sweeping a constrictor 0->1 at 20Hz would be unpleasant
@@ -122,6 +123,11 @@ class ButtplugDevice(AbstractDevice):
         self._max_ping_ms = 0
         self._connection_attempts = 0
 
+        # Bumped on every connect(). A worker thread carries the generation it
+        # was born with and only touches shared state while it is still the
+        # current one — see _is_current().
+        self._generation = 0
+
         # Discovered toys: device_index -> {name, scalars, linears, rotates}
         self._devices: Dict[int, dict] = {}
         # Which of them to drive. Empty = all of them.
@@ -156,32 +162,55 @@ class ButtplugDevice(AbstractDevice):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
+    def _is_current(self, generation: int) -> bool:
+        """Is this worker still the live one, or has connect() moved on?"""
+        with self._lock:
+            return generation == self._generation
+
     def connect(self, address: Optional[str] = None) -> bool:
-        if self._state.connected:
-            self.disconnect()
+        # Unconditional teardown: a worker that is merely *failing* to connect
+        # is still a worker, and leaving it behind is how you end up with half a
+        # dozen overlapping reconnect loops fighting over self._ws.
+        if self._thread is not None:
+            self._teardown()
 
         self._ws_url = (address or "").strip() or _configured_url()
         self._vibe_floor = _configured_floor()
-        self._stop_event.clear()
         self._connection_attempts = 0
 
-        self._thread = threading.Thread(target=self._run_thread, daemon=True)
+        # A fresh stop event per worker. Sharing one would let a new connect()
+        # un-stop the zombies that the previous teardown had just killed, since
+        # they spend most of their life asleep in the reconnect backoff.
+        stop = threading.Event()
+        with self._lock:
+            self._generation += 1
+            generation = self._generation
+            self._stop_event = stop
+
+        self._thread = threading.Thread(
+            target=self._run_thread, args=(generation, stop), daemon=True)
         self._thread.start()
 
         # Give the handshake a moment; Intiface is local so this is fast.
         for _ in range(50):
             if self._state.connected:
                 return True
-            if self._stop_event.is_set():
+            if stop.is_set():
                 return False
             time.sleep(0.1)
         return self._state.connected
 
     def disconnect(self) -> None:
+        self._teardown()
+        log.info("Buttplug disconnected")
+
+    def _teardown(self) -> None:
+        """Stop the current worker and clear the connection-scoped state."""
         self._stop_event.set()
-        if self._loop:
+        loop = self._loop
+        if loop is not None:
             try:
-                future = asyncio.run_coroutine_threadsafe(self._shutdown_async(), self._loop)
+                future = asyncio.run_coroutine_threadsafe(self._shutdown_async(), loop)
                 future.result(timeout=5)
             except Exception:
                 pass
@@ -194,7 +223,6 @@ class ButtplugDevice(AbstractDevice):
             self._move_active = False
         self._update_state(connected=False, running=False, engineReady=False,
                            device_count=0, devices=[])
-        log.info("Buttplug disconnected")
 
     async def _shutdown_async(self):
         try:
@@ -208,31 +236,45 @@ class ButtplugDevice(AbstractDevice):
                 pass
         self._ws = None
 
-    def _run_thread(self):
-        self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
+    def _run_thread(self, generation: int, stop: threading.Event):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        with self._lock:
+            if self._is_current(generation):
+                self._loop = loop
         try:
-            self._loop.run_until_complete(self._main())
+            loop.run_until_complete(self._main(generation, stop))
         except Exception as exc:
             log.error("Buttplug thread error: %s", exc)
         finally:
             try:
-                self._loop.close()
+                loop.close()
             except Exception:
                 pass
-            self._loop = None
+            with self._lock:
+                # Only clear the handle if it is still ours; a straggler must not
+                # null out the loop the live worker is running on.
+                if self._loop is loop:
+                    self._loop = None
 
-    async def _main(self):
-        while not self._stop_event.is_set():
+    async def _main(self, generation: int, stop: threading.Event):
+        while not stop.is_set() and self._is_current(generation):
             try:
-                await self._connect_and_serve()
+                await self._connect_and_serve(generation, stop)
             except Exception as exc:
-                log.warning("Buttplug connection lost: %s", exc)
+                if self._is_current(generation):
+                    log.warning("Buttplug connection lost: %s", exc)
             finally:
-                self._ws = None
-                self._update_state(connected=False, engineReady=False)
+                # Same reasoning as the loop handle above: a failing straggler
+                # used to tear down the *live* socket here and flip the UI to
+                # disconnected while the real connection was healthy.
+                with self._lock:
+                    if self._is_current(generation):
+                        self._ws = None
+                if self._is_current(generation):
+                    self._update_state(connected=False, engineReady=False)
 
-            if self._stop_event.is_set():
+            if stop.is_set() or not self._is_current(generation):
                 break
             self._connection_attempts += 1
             delay = min(
@@ -243,22 +285,26 @@ class ButtplugDevice(AbstractDevice):
                      delay, self._connection_attempts)
             await asyncio.sleep(delay)
 
-    async def _connect_and_serve(self):
+    async def _connect_and_serve(self, generation: int, stop: threading.Event):
         url = self._ws_url or DEFAULT_WS_URL
         log.info("Buttplug connecting to %s", url)
         async with websockets.connect(url, close_timeout=2) as ws:
+            if not self._is_current(generation):
+                return
             self._ws = ws
-            await self._handshake()
+            await self._handshake(ws)
+            if not self._is_current(generation):
+                return
             self._connection_attempts = 0
             self._update_state(connected=True, engineReady=True)
             log.info("Buttplug connected to Intiface at %s", url)
 
             tasks = [
                 asyncio.create_task(self._recv_loop(ws)),
-                asyncio.create_task(self._tick_loop()),
+                asyncio.create_task(self._tick_loop(stop)),
             ]
             if self._max_ping_ms > 0:
-                tasks.append(asyncio.create_task(self._ping_loop()))
+                tasks.append(asyncio.create_task(self._ping_loop(stop)))
 
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in pending:
@@ -283,14 +329,24 @@ class ButtplugDevice(AbstractDevice):
             return
         await ws.send(json.dumps([message]))
 
-    async def _handshake(self):
+    async def _handshake(self, ws):
         await self._send({"RequestServerInfo": {
             "Id": self._next_id(),
             "ClientName": CLIENT_NAME,
             "MessageVersion": MESSAGE_VERSION,
         }})
-        # ServerInfo lands in _recv_loop; ask for the inventory straight away so
-        # already-paired toys show up immediately.
+
+        # Wait for ServerInfo before sending anything else. Pipelining behind
+        # RequestServerInfo gets the follow-ups rejected outright with
+        # ButtplugHandshakeError/RequestServerInfoExpected, which silently cost
+        # us the device list on every connect. The reply is read inline here
+        # because _recv_loop only starts once the handshake is done.
+        while True:
+            raw = await asyncio.wait_for(ws.recv(), timeout=HANDSHAKE_TIMEOUT)
+            if "ServerInfo" in self._dispatch(raw):
+                break
+
+        # Ask for the inventory so already-paired toys show up immediately.
         await self._send({"RequestDeviceList": {"Id": self._next_id()}})
         # Intiface normally scans on its own and reports toys via DeviceAdded,
         # which is why there is no scan button in the UI. This one-shot is only a
@@ -298,9 +354,9 @@ class ButtplugDevice(AbstractDevice):
         # setup would show an empty list with no way to recover.
         await self._send({"StartScanning": {"Id": self._next_id()}})
 
-    async def _ping_loop(self):
+    async def _ping_loop(self, stop: threading.Event):
         interval = max(0.25, (self._max_ping_ms / 1000.0) / 2.0)
-        while not self._stop_event.is_set():
+        while not stop.is_set():
             try:
                 await self._send({"Ping": {"Id": self._next_id()}})
             except Exception:
@@ -310,17 +366,24 @@ class ButtplugDevice(AbstractDevice):
     async def _recv_loop(self, ws):
         try:
             async for raw in ws:
-                try:
-                    frame = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(frame, list):
-                    frame = [frame]
-                for message in frame:
-                    for name, payload in message.items():
-                        self._handle_message(name, payload or {})
+                self._dispatch(raw)
         except Exception as exc:
             log.warning("Buttplug recv ended: %s", exc)
+
+    def _dispatch(self, raw) -> List[str]:
+        """Handle one wire frame; returns the message names it carried."""
+        try:
+            frame = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(frame, list):
+            frame = [frame]
+        names = []
+        for message in frame:
+            for name, payload in message.items():
+                names.append(name)
+                self._handle_message(name, payload or {})
+        return names
 
     def _handle_message(self, name: str, payload: dict) -> None:
         if name == "ServerInfo":
@@ -415,8 +478,8 @@ class ButtplugDevice(AbstractDevice):
 
     # ── Ticker ────────────────────────────────────────────────────────────────
 
-    async def _tick_loop(self):
-        while not self._stop_event.is_set():
+    async def _tick_loop(self, stop: threading.Event):
+        while not stop.is_set():
             try:
                 await self._tick()
             except Exception as exc:
