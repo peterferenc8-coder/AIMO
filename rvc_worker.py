@@ -73,13 +73,40 @@ def _install_caches():
 
     def cached_read_index(path, *a, **kw):
         if path not in _index_cache:
-            _index_cache[path] = real_read_index(path, *a, **kw)
+            _index_cache[path] = _CachedIndex(real_read_index(path, *a, **kw))
         return _index_cache[path]
 
     faiss.read_index = cached_read_index
     patched.append("faiss")
 
     return patched
+
+
+class _CachedIndex:
+    """A FAISS index whose reconstruct_n() result is memoised.
+
+    Applio rebuilds the entire speaker-embedding matrix out of the index on
+    every conversion (`big_npy = index.reconstruct_n(0, index.ntotal)`), which
+    measured 60-80ms for a 24536x768 matrix -- around 7% of a short utterance,
+    repaid for nothing since the result is a pure function of the index.
+
+    The pipeline only ever reads big_npy (`big_npy[ix]`), so handing out the
+    same array each time is safe.  Everything else -- .ntotal, .search() --
+    falls through to the real index untouched.
+    """
+
+    def __init__(self, index):
+        self._index = index
+        self._reconstructed = {}
+
+    def __getattr__(self, name):
+        return getattr(self._index, name)
+
+    def reconstruct_n(self, start, count):
+        key = (start, count)
+        if key not in self._reconstructed:
+            self._reconstructed[key] = self._index.reconstruct_n(start, count)
+        return self._reconstructed[key]
 
 
 def main():

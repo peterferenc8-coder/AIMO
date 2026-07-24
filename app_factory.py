@@ -33,7 +33,28 @@ def create_app() -> Flask:
         set_active_device("none")
     except Exception as exc:
         logging.getLogger(__name__).warning("Failed to initialize default device: %s", exc)
+    _prewarm_tts()
     return app
+
+
+def _prewarm_tts() -> None:
+    """Load the Kokoro and RVC models in the background as the server comes up.
+
+    Both are otherwise loaded on first use, inside the /api/start request that
+    synthesises the opening turns -- so the user pays ~30s of model loading
+    watching a blank screen.  The server binds its port immediately either way;
+    this thread just races the user's first click, and usually wins it.
+    """
+    import threading
+
+    def _run() -> None:
+        try:
+            import tts
+            tts.prewarm()
+        except Exception as exc:  # noqa: BLE001 - boot must never fail on this
+            logging.getLogger(__name__).info("TTS prewarm unavailable: %s", exc)
+
+    threading.Thread(target=_run, name="tts-prewarm", daemon=True).start()
 
 
 def _setup_logging() -> None:

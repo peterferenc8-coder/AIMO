@@ -66,9 +66,15 @@ def configure(voice: str | None = None, speed: float | None = None,
         new_device = str(device).lower()
         if new_device != DEVICE:
             DEVICE = new_device
-            # Force the pipeline to rebuild on the new device next synthesis.
-            _pipeline = None
-            _pipeline_device = None
+            # Rebuild only if this actually moves the model.  The saved setting
+            # is a *request* ("auto"/"cpu"/"cuda") and several of them resolve
+            # to the same device -- "auto" is "cuda" on a CUDA box.  Comparing
+            # the requests rather than the resolved devices would tear down the
+            # prewarmed pipeline on the first session start and pay its ~20s
+            # load again, inside the request the prewarm exists to keep fast.
+            if _pipeline_device is not None and _resolve_device() != _pipeline_device:
+                _pipeline = None
+                _pipeline_device = None
 
 
 def _resolve_device() -> str:
@@ -285,6 +291,65 @@ def synthesize(text: str, voice: str | None = None, speed: float | None = None) 
 
     log.info("TTS generated %d words, %d ms audio", len(words), duration_ms)
     return meta
+
+
+def prewarm() -> bool:
+    """
+    Load and exercise every model the speech path needs.  Returns True if the
+    voice is ready to synthesise at full speed.
+
+    Both stages are lazy by nature -- Kokoro builds its pipeline on the first
+    synthesise, the RVC worker only spawns on the first conversion -- which
+    stacks ~30s of model loading in front of the first spoken line of a
+    session.  Doing it at boot moves that cost to where nothing is waiting.
+
+    The throwaway utterance is not optional padding: the first pass through
+    either model also compiles its CUDA kernels, measured at ~4.5s on the RVC
+    side alone.  Warming the pipeline without running audio through it leaves
+    that cost exactly where it was.
+    """
+    import numpy as np
+
+    try:
+        pipeline = _get_pipeline()
+    except Exception as exc:  # noqa: BLE001 - TTS extras may not be installed
+        log.info("TTS prewarm skipped: %s", exc)
+        return False
+
+    try:
+        results = list(pipeline("Warming up.", voice=VOICE, speed=KOKORO_SPEED))
+        chunks = [np.asarray(r.audio, dtype=np.float32)
+                  for r in results if getattr(r, "audio", None) is not None]
+    except Exception as exc:  # noqa: BLE001 - never let boot fail over this
+        log.warning("Kokoro prewarm failed: %s", exc)
+        return False
+
+    if not chunks or not _rvc_enabled():
+        log.info("TTS prewarmed (Kokoro only)")
+        return bool(chunks)
+
+    # Run the warm audio through RVC so its kernels compile here too.
+    import rvc_client as rvc
+
+    AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    src = AUDIO_CACHE_DIR / "_prewarm_in.wav"
+    dst = AUDIO_CACHE_DIR / "_prewarm_out.wav"
+    try:
+        import soundfile as sf
+        sf.write(str(src), np.concatenate(chunks), SAMPLE_RATE)
+        ok = rvc.convert(str(src), str(dst)) is not None
+    except Exception as exc:  # noqa: BLE001
+        log.warning("RVC prewarm failed: %s", exc)
+        ok = False
+    finally:
+        for f in (src, dst):
+            try:
+                f.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    log.info("TTS prewarmed (Kokoro%s)", " + RVC" if ok else ", RVC unavailable")
+    return True
 
 
 def get_audio_path(cache_key: str) -> Path | None:
