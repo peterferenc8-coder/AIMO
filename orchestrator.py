@@ -36,9 +36,12 @@ from config import (
     HIGH_WATERMARK,
     LOW_WATERMARK,
     MODEL_OPTIONS,
+    OPENROUTER_MODEL,
+    OPENROUTER_MODEL_OPTIONS,
+    OPENROUTER_TIMEOUT,
     VIDEO_CHANCE,
 )
-from ai_connector import GoogleAIConnector, GroqAIConnector
+from ai_connector import GoogleAIConnector, GroqAIConnector, OpenRouterAIConnector
 from brain import Brain
 from feedback_store import add_banned_phrase, remove_banned_phrase
 from response_parser import Commands, ResponseParser, Turn
@@ -121,6 +124,12 @@ class SessionOrchestrator:
             api_key=self._settings.get("groq_api_key", ""),
             model=self._settings.get("groq_model", "openai/gpt-oss-120b"),
             timeout=self._settings.get("groq_timeout", GROQ_TIMEOUT),
+            gen_options=self._gen_options(),
+        )
+        self.openrouter_connector = OpenRouterAIConnector(
+            api_key=self._settings.get("openrouter_api_key", ""),
+            model=self._settings.get("openrouter_model", OPENROUTER_MODEL),
+            timeout=self._settings.get("openrouter_timeout", OPENROUTER_TIMEOUT),
             gen_options=self._gen_options(),
         )
 
@@ -236,6 +245,12 @@ class SessionOrchestrator:
             api_key=self._settings.get("groq_api_key", ""),
             model=self._settings.get("groq_model", self.groq_connector.model),
             timeout=self._settings.get("groq_timeout", GROQ_TIMEOUT),
+            gen_options=gen,
+        )
+        self.openrouter_connector.reconfigure(
+            api_key=self._settings.get("openrouter_api_key", ""),
+            model=self._settings.get("openrouter_model", self.openrouter_connector.model),
+            timeout=self._settings.get("openrouter_timeout", OPENROUTER_TIMEOUT),
             gen_options=gen,
         )
         active_model = self.big_connector.model
@@ -867,7 +882,13 @@ class SessionOrchestrator:
     def _is_groq_model(model: str) -> bool:
         return model in GROQ_MODEL_OPTIONS
 
+    @staticmethod
+    def _is_openrouter_model(model: str) -> bool:
+        return model in OPENROUTER_MODEL_OPTIONS
+
     def _connector_for_model(self, model: str):
+        if self._is_openrouter_model(model):
+            return self.openrouter_connector
         if self._is_groq_model(model):
             return self.groq_connector
         return self.google_connector

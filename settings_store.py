@@ -24,6 +24,8 @@ from config import (
     VIDEO_CHANCE,
     GOOGLE_TIMEOUT,
     GROQ_TIMEOUT,
+    OPENROUTER_MODEL,
+    OPENROUTER_TIMEOUT,
     BIG_MODEL_MAX_RETRIES,
     BIG_MODEL_RETRY_DELAY,
     GENERATION_OPTIONS,
@@ -51,8 +53,10 @@ from config import (
 DEFAULT_SETTINGS: dict[str, Any] = {
     "google_api_key": "",
     "groq_api_key": "",
+    "openrouter_api_key": "",
     "google_model": "gemma-4-31b-it",
     "groq_model": "openai/gpt-oss-120b",
+    "openrouter_model": OPENROUTER_MODEL,
     "tts_enabled": True,
     "stash_url": STASH_URL,
     "stash_api_key": STASH_API_KEY,
@@ -67,6 +71,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "gen_top_k": GENERATION_OPTIONS.get("top_k", 60),
     "google_timeout": GOOGLE_TIMEOUT,
     "groq_timeout": GROQ_TIMEOUT,
+    "openrouter_timeout": OPENROUTER_TIMEOUT,
     "big_model_max_retries": BIG_MODEL_MAX_RETRIES,
     "big_model_retry_delay": BIG_MODEL_RETRY_DELAY,
     # ── Session / pacing ───────────────────────────────────────────────────
@@ -99,6 +104,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "checked_at": None,
     },
     "groq_validation": {
+        "ok": False,
+        "message": "Not validated yet",
+        "checked_at": None,
+    },
+    "openrouter_validation": {
         "ok": False,
         "message": "Not validated yet",
         "checked_at": None,
@@ -154,8 +164,10 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
     d = DEFAULT_SETTINGS
     settings["google_api_key"] = _as_clean_text(settings.get("google_api_key"))
     settings["groq_api_key"] = _as_clean_text(settings.get("groq_api_key"))
+    settings["openrouter_api_key"] = _as_clean_text(settings.get("openrouter_api_key"))
     settings["google_model"] = _as_clean_text(settings.get("google_model"))
     settings["groq_model"] = _as_clean_text(settings.get("groq_model"))
+    settings["openrouter_model"] = _as_clean_text(settings.get("openrouter_model"))
     settings["tts_enabled"] = bool(settings.get("tts_enabled", d["tts_enabled"]))
     settings["stash_url"] = _as_clean_text(settings.get("stash_url")).rstrip("/")
     settings["stash_api_key"] = _as_clean_text(settings.get("stash_api_key"))
@@ -171,6 +183,7 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
     settings["gen_top_k"] = _as_int(settings.get("gen_top_k"), d["gen_top_k"], 0, 1000)
     settings["google_timeout"] = _as_int(settings.get("google_timeout"), d["google_timeout"], 1, 3600)
     settings["groq_timeout"] = _as_int(settings.get("groq_timeout"), d["groq_timeout"], 1, 3600)
+    settings["openrouter_timeout"] = _as_int(settings.get("openrouter_timeout"), d["openrouter_timeout"], 1, 3600)
     settings["big_model_max_retries"] = _as_int(settings.get("big_model_max_retries"), d["big_model_max_retries"], 0, 20)
     settings["big_model_retry_delay"] = _as_int(settings.get("big_model_retry_delay"), d["big_model_retry_delay"], 0, 600)
 
@@ -207,6 +220,7 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
     settings["google_validation"] = _normalized_validation(settings.get("google_validation"))
     settings["groq_validation"] = _normalized_validation(settings.get("groq_validation"))
+    settings["openrouter_validation"] = _normalized_validation(settings.get("openrouter_validation"))
     settings["stash_validation"] = _normalized_validation(settings.get("stash_validation"))
     return settings
 
@@ -218,6 +232,7 @@ def load_settings() -> dict[str, Any]:
         {
             "google_model": os.getenv("GOOGLE_MODEL", settings["google_model"]),
             "groq_model": os.getenv("GROQ_MODEL", settings["groq_model"]),
+            "openrouter_model": os.getenv("OPENROUTER_MODEL", settings["openrouter_model"]),
         }
     )
 
@@ -262,4 +277,5 @@ def provider_presence(settings: dict[str, Any]) -> dict[str, bool]:
     return {
         "google": bool(str(settings.get("google_api_key", "") or "").strip()),
         "groq": bool(str(settings.get("groq_api_key", "") or "").strip()),
+        "openrouter": bool(str(settings.get("openrouter_api_key", "") or "").strip()),
     }

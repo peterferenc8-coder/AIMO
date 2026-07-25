@@ -102,6 +102,25 @@ GROQ_MODEL_OPTIONS = [
     "qwen/qwen3-32b"
 ]
 
+# ── OpenRouter ───────────────────────────────────────────────────────────────
+# OpenRouter is OpenAI-compatible, so the connector is a sibling of the Groq
+# one.  Only zero-cost ":free" models are listed: the free pool is rate limited
+# to 20 requests/minute and 50 requests/day (1000/day once the account has ever
+# purchased $10 of credit), which is the binding constraint on a long session --
+# one generation call covers HIGH_WATERMARK turns.  Ordered best-first; edit
+# freely, OpenRouter rotates the free pool without notice.
+OPENROUTER_MODEL   = os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3-ultra-550b-a55b:free")
+OPENROUTER_TIMEOUT = int(os.getenv("OPENROUTER_TIMEOUT", "240"))
+OPENROUTER_MODEL_OPTIONS = [
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "nvidia/nemotron-3-nano-30b-a3b:free",
+    "inclusionai/ling-3.0-flash:free",
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "openai/gpt-oss-20b:free",
+]
+
 # Generation hyperparameters
 GENERATION_OPTIONS = {
     "temperature":   float(os.getenv("GEN_TEMPERATURE",  "1.2")),
