@@ -1,10 +1,12 @@
 const $settings = (id) => document.getElementById(id);
 const $$settings = (sel) => Array.from(document.querySelectorAll(sel));
 
+// Every AI back end that follows the key → Test → unlock model dropdown flow.
+const AI_PROVIDERS = ['google', 'groq', 'openrouter'];
+
 const settingsState = {
   promptNames: [],
-  googleKeyPresent: false,
-  groqKeyPresent: false,
+  keyPresent: Object.fromEntries(AI_PROVIDERS.map((p) => [p, false])),
   dirty: false,
 };
 
@@ -14,6 +16,9 @@ const SETTING_HELP = {
   google_model: 'Which Google model generates turns. Unlocks once a valid key is saved and tested.',
   groq_api_key: 'Your Groq API key for Groq-hosted models (Llama, Qwen, GPT-OSS). Stored locally.',
   groq_model: 'Which Groq model generates turns. Unlocks once a valid key is saved and tested.',
+  openrouter_api_key: 'Your OpenRouter API key. Stored locally. Only zero-cost ":free" models are offered.',
+  openrouter_model: 'Which OpenRouter model generates turns. Unlocks once a valid key is saved and tested. Free models are capped at 20 requests/minute and 50/day (1000/day once the account has purchased $10 of credit).',
+  openrouter_timeout: 'Seconds to wait for an OpenRouter response. Large reasoning models are far slower than Groq — leave this generous.',
   gen_temperature: 'Sampling temperature (0–2). Higher is more random/creative, lower is more focused.',
   gen_top_p: 'Nucleus sampling (0–1). Restricts choices to the most probable tokens by cumulative probability.',
   gen_top_k: 'Top-k sampling. Restricts choices to the k most likely tokens (0 disables it).',
@@ -127,8 +132,7 @@ function syncModelLock(provider) {
   const keyField = $settings(`settings-${provider}-key`);
   const modelSelect = $settings(`settings-${provider}-model`);
   const status = $settings(`settings-${provider}-model-status`);
-  const stateKey = provider === 'google' ? 'googleKeyPresent' : 'groqKeyPresent';
-  const hasKey = settingsState[stateKey] || Boolean(keyField && keyField.value.trim());
+  const hasKey = settingsState.keyPresent[provider] || Boolean(keyField && keyField.value.trim());
   if (modelSelect) modelSelect.disabled = !hasKey;
   if (status) {
     status.textContent = hasKey ? 'Unlocked' : 'Locked until a working key is present';
@@ -174,9 +178,9 @@ function collectSettings() {
 // ── Status panel refresh ─────────────────────────────────────────────────────
 
 function applyStatusPanel(data) {
-  for (const provider of ['google', 'groq']) {
+  for (const provider of AI_PROVIDERS) {
     const present = Boolean(data[`${provider}_key_present`]);
-    settingsState[provider === 'google' ? 'googleKeyPresent' : 'groqKeyPresent'] = present;
+    settingsState.keyPresent[provider] = present;
     setKeyState(provider, present);
 
     const status = $settings(`settings-${provider}-status`);
@@ -203,8 +207,7 @@ function applyStatusPanel(data) {
     stashV?.ok
   );
 
-  syncModelLock('google');
-  syncModelLock('groq');
+  for (const provider of AI_PROVIDERS) syncModelLock(provider);
 }
 
 // ── Load ──────────────────────────────────────────────────────────────────────
@@ -218,6 +221,7 @@ async function loadSettings() {
   // Model dropdown options must be populated before generic fill sets the value.
   populateSelect($settings('settings-google-model'), data.google_model_options || [], data.google_model || '');
   populateSelect($settings('settings-groq-model'), data.groq_model_options || [], data.groq_model || '');
+  populateSelect($settings('settings-openrouter-model'), data.openrouter_model_options || [], data.openrouter_model || '');
   populateSelect($settings('settings-prompt-name'), settingsState.promptNames, settingsState.promptNames[0] || '');
 
   fillSettingFields(data);
@@ -274,9 +278,8 @@ async function testService(provider) {
 
   const v = data.validation || {};
   setValidationState(provider, v.ok ? 'Valid' : (v.message || 'Failed'), v.ok);
-  if (provider === 'google' || provider === 'groq') {
-    settingsState[provider === 'google' ? 'googleKeyPresent' : 'groqKeyPresent'] =
-      settingsState[provider === 'google' ? 'googleKeyPresent' : 'groqKeyPresent'] || v.ok;
+  if (AI_PROVIDERS.includes(provider)) {
+    settingsState.keyPresent[provider] = settingsState.keyPresent[provider] || v.ok;
     syncModelLock(provider);
   }
   setGlobalStatus(v.ok ? `${provider} connected.` : `${provider}: ${v.message || 'failed'}.`, !v.ok);
@@ -366,7 +369,7 @@ function wireSettingsEvents() {
     el.addEventListener(evt, () => setDirty(true));
   }
 
-  for (const provider of ['google', 'groq']) {
+  for (const provider of AI_PROVIDERS) {
     const keyField = $settings(`settings-${provider}-key`);
     if (keyField) keyField.addEventListener('input', () => syncModelLock(provider));
   }

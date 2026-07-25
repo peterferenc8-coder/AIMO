@@ -18,8 +18,13 @@ from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, render_template, request, send_file
 
-from ai_connector import GoogleAIConnector, GroqAIConnector
-from config import AI_TO_DEVICE_PATTERN_MAP, GROQ_MODEL_OPTIONS, MODEL_OPTIONS
+from ai_connector import GoogleAIConnector, GroqAIConnector, OpenRouterAIConnector
+from config import (
+    AI_TO_DEVICE_PATTERN_MAP,
+    GROQ_MODEL_OPTIONS,
+    MODEL_OPTIONS,
+    OPENROUTER_MODEL_OPTIONS,
+)
 from devices.registry import (
     get_active_device,
     get_active_type,
@@ -41,11 +46,12 @@ import tts
 
 # Non-secret scalar settings the Settings UI can read back and write.
 PLAIN_SETTING_KEYS = (
-    "google_model", "groq_model", "tts_enabled",
+    "google_model", "groq_model", "openrouter_model", "tts_enabled",
     "stash_url", "stash_tag", "stash_video_enabled",
     "stash_proxy_enabled", "stash_proxy_address", "video_chance",
     "gen_temperature", "gen_top_p", "gen_top_k",
-    "google_timeout", "groq_timeout", "big_model_max_retries", "big_model_retry_delay",
+    "google_timeout", "groq_timeout", "openrouter_timeout",
+    "big_model_max_retries", "big_model_retry_delay",
     "default_turns", "banned_phrase_window", "display_interval",
     "low_watermark", "high_watermark", "generator_sleep",
     "kokoro_voice", "kokoro_speed", "kokoro_device",
@@ -54,7 +60,7 @@ PLAIN_SETTING_KEYS = (
     "coyote_soft_limit_a", "coyote_soft_limit_b", "coyote_freq_ms",
     "buttplug_ws_url", "buttplug_vibe_floor",
 )
-SECRET_SETTING_KEYS = ("google_api_key", "groq_api_key", "stash_api_key")
+SECRET_SETTING_KEYS = ("google_api_key", "groq_api_key", "openrouter_api_key", "stash_api_key")
 
 from config import (
     CUSTOM_PATTERNS_DIR,
@@ -304,8 +310,10 @@ def _saved_settings_payload(settings: dict) -> dict:
     payload.update({
         "google_api_key_masked": mask_secret(settings.get("google_api_key", "")),
         "groq_api_key_masked": mask_secret(settings.get("groq_api_key", "")),
+        "openrouter_api_key_masked": mask_secret(settings.get("openrouter_api_key", "")),
         "google_key_present": bool(settings.get("google_api_key", "")),
         "groq_key_present": bool(settings.get("groq_api_key", "")),
+        "openrouter_key_present": bool(settings.get("openrouter_api_key", "")),
         "stash_api_key_masked": mask_secret(settings.get("stash_api_key", "")),
         "stash_key_present": bool(str(settings.get("stash_api_key", "") or "").strip()),
     })
@@ -324,6 +332,11 @@ def _available_ai_models(settings: dict) -> list[str]:
     groq_present = bool(str(settings.get("groq_api_key", "") or "").strip())
     if groq_present and groq_valid:
         models.extend(GROQ_MODEL_OPTIONS)
+
+    openrouter_valid = bool(settings.get("openrouter_validation", {}).get("ok"))
+    openrouter_present = bool(str(settings.get("openrouter_api_key", "") or "").strip())
+    if openrouter_present and openrouter_valid:
+        models.extend(OPENROUTER_MODEL_OPTIONS)
 
     return models
 
@@ -386,19 +399,24 @@ def register_routes(app: Flask) -> None:
         presence = provider_presence(settings)
         google_validation = _validation_from_settings(settings, "google_validation")
         groq_validation = _validation_from_settings(settings, "groq_validation")
+        openrouter_validation = _validation_from_settings(settings, "openrouter_validation")
 
         payload = {
             "ok": True,
             "google_api_key_masked": mask_secret(settings.get("google_api_key", "")),
             "groq_api_key_masked": mask_secret(settings.get("groq_api_key", "")),
+            "openrouter_api_key_masked": mask_secret(settings.get("openrouter_api_key", "")),
             "google_key_present": presence["google"],
             "groq_key_present": presence["groq"],
+            "openrouter_key_present": presence["openrouter"],
             "stash_api_key_masked": mask_secret(settings.get("stash_api_key", "")),
             "stash_key_present": bool(str(settings.get("stash_api_key", "") or "").strip()),
             "google_model_options": MODEL_OPTIONS,
             "groq_model_options": GROQ_MODEL_OPTIONS,
+            "openrouter_model_options": OPENROUTER_MODEL_OPTIONS,
             "google_validation": google_validation,
             "groq_validation": groq_validation,
+            "openrouter_validation": openrouter_validation,
             "stash_validation": _validation_from_settings(settings, "stash_validation"),
             "prompt_names": list_base_prompt_names(),
         }
@@ -431,6 +449,8 @@ def register_routes(app: Flask) -> None:
             next_settings["google_validation"] = pending
         if _changed(body, current, "groq_api_key", "groq_model"):
             next_settings["groq_validation"] = pending
+        if _changed(body, current, "openrouter_api_key", "openrouter_model"):
+            next_settings["openrouter_validation"] = pending
         if _changed(body, current, "stash_api_key", "stash_url", "stash_tag",
                     "stash_proxy_enabled", "stash_proxy_address"):
             next_settings["stash_validation"] = pending
@@ -449,6 +469,7 @@ def register_routes(app: Flask) -> None:
                 "saved": _saved_settings_payload(saved),
                 "google_validation": saved.get("google_validation"),
                 "groq_validation": saved.get("groq_validation"),
+                "openrouter_validation": saved.get("openrouter_validation"),
                 "stash_validation": saved.get("stash_validation"),
                 "tts_enabled": saved.get("tts_enabled", True),
                 "prompt_names": list_base_prompt_names(),
@@ -473,6 +494,11 @@ def register_routes(app: Flask) -> None:
                 saved.get("groq_api_key", ""), saved.get("groq_model", "")
             )
             saved["groq_validation"] = validation
+        elif provider == "openrouter":
+            validation = _validate_openrouter_key(
+                saved.get("openrouter_api_key", ""), saved.get("openrouter_model", "")
+            )
+            saved["openrouter_validation"] = validation
         elif provider == "stash":
             client = StashClient(
                 url=saved.get("stash_url", ""),
@@ -1106,5 +1132,10 @@ def _validate_google_key(api_key: str, model: str) -> dict:
 
 def _validate_groq_key(api_key: str, model: str) -> dict:
     connector = GroqAIConnector(api_key=api_key, model=model)
+    return connector.validate_api_key()
+
+
+def _validate_openrouter_key(api_key: str, model: str) -> dict:
+    connector = OpenRouterAIConnector(api_key=api_key, model=model)
     return connector.validate_api_key()
 

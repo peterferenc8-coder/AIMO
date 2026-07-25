@@ -1,7 +1,7 @@
 """
 ai_connector.py
 ---------------
-Thin wrappers around Google and Groq Generative AI APIs.
+Thin wrappers around the Google, Groq and OpenRouter Generative AI APIs.
 
 Now stateful: system prompt is set once per session, then only
 new user messages are sent each turn.
@@ -23,6 +23,8 @@ from config import (
     GROQ_MODEL,
     GROQ_TIMEOUT,
     LOGS_DIR,
+    OPENROUTER_MODEL,
+    OPENROUTER_TIMEOUT,
 )
 
 log = logging.getLogger(__name__)
@@ -284,37 +286,57 @@ class GoogleAIConnector(BaseAIConnector):
         return ""
 
 
-# ── Groq ─────────────────────────────────────────────────────────────────────
+# ── OpenAI-compatible back ends (Groq, OpenRouter) ───────────────────────────
 
-class GroqAIConnector(BaseAIConnector):
+class OpenAICompatConnector(BaseAIConnector):
     """
-    Talks to Groq's OpenAI-compatible API using stateful chat sessions.
-    Maintains the messages array internally.
+    Talks to an OpenAI-compatible /chat/completions endpoint using stateful
+    chat sessions. Maintains the messages array internally.
+
+    Subclasses supply the endpoints and, where the provider needs them, extra
+    request headers or a friendlier hint for a provider-specific HTTP error.
     """
+
+    BASE_URL = ""
+    VALIDATION_URL = ""
+    LOG_DIR_NAME = "openai_compat_api_responses"
+
+    # System prompt + last 20 user/assistant pairs.
+    MAX_HISTORY = 41
 
     def __init__(
         self,
         api_key: str = "",
-        model: str = GROQ_MODEL,
-        timeout: int = GROQ_TIMEOUT,
+        model: str = "",
+        timeout: int = 240,
         gen_options: dict | None = None,
     ):
-        self.base_url = "https://api.groq.com/openai/v1/chat/completions"
-        self.models_url = "https://api.groq.com/openai/v1/models"
+        self.base_url = self.BASE_URL
+        self.validation_url = self.VALIDATION_URL
         self._messages: list[dict[str, str]] = []
         super().__init__(
             api_key=api_key,
             model=model,
             timeout=timeout,
-            log_dir_name="groq_api_responses",
+            log_dir_name=self.LOG_DIR_NAME,
             gen_options=gen_options,
         )
+
+    # ── Provider hooks ────────────────────────────────────────────────────────
+
+    def _extra_headers(self) -> dict[str, str]:
+        """Additional headers merged into every request."""
+        return {}
+
+    def _http_error_hint(self, status: int, details: str) -> str | None:
+        """Return a friendlier message for a known provider-specific failure."""
+        return None
 
     def _is_configured(self) -> bool:
         return bool(self.api_key)
 
     def _do_validation_call(self) -> None:
-        self._call_models()
+        self._call_validation()
 
     def _start_chat_session(self, system_prompt: str) -> None:
         self._messages = [
@@ -341,9 +363,8 @@ class GroqAIConnector(BaseAIConnector):
         self._messages.append({"role": "assistant", "content": text})
 
         # Trim history if it gets too long (keep last 20 turns)
-        # System prompt + last 20 user/assistant pairs = ~41 messages max
-        if len(self._messages) > 41:
-            self._messages = [self._messages[0]] + self._messages[-40:]
+        if len(self._messages) > self.MAX_HISTORY:
+            self._messages = [self._messages[0]] + self._messages[-(self.MAX_HISTORY - 1):]
 
         return text
 
@@ -356,9 +377,9 @@ class GroqAIConnector(BaseAIConnector):
             content_type="application/json",
         )
 
-    def _call_models(self) -> dict[str, Any]:
+    def _call_validation(self) -> dict[str, Any]:
         return self._request_json(
-            url=self.models_url,
+            url=self.validation_url,
             method="GET",
         )
 
@@ -374,6 +395,7 @@ class GroqAIConnector(BaseAIConnector):
             "Accept": "application/json",
             "User-Agent": "Aimee/1.0 (+local)",
         }
+        headers.update(self._extra_headers())
         if content_type:
             headers["Content-Type"] = content_type
 
@@ -393,12 +415,9 @@ class GroqAIConnector(BaseAIConnector):
             except Exception:
                 details = str(exc)
 
-            lowered = details.lower()
-            if "error code: 1010" in lowered:
-                raise RuntimeError(
-                    "HTTP 403 (Cloudflare 1010): request blocked before reaching Groq API. "
-                    "Try without VPN/proxy, allow direct HTTPS to api.groq.com, and retry."
-                ) from exc
+            hint = self._http_error_hint(exc.code, details)
+            if hint:
+                raise RuntimeError(hint) from exc
 
             raise RuntimeError(f"HTTP {exc.code}: {details[:200]}") from exc
         except urllib.error.URLError as exc:
@@ -413,3 +432,82 @@ class GroqAIConnector(BaseAIConnector):
         message = choices[0].get("message", {})
         content = message.get("content", "")
         return content if isinstance(content, str) else ""
+
+
+# ── Groq ─────────────────────────────────────────────────────────────────────
+
+class GroqAIConnector(OpenAICompatConnector):
+    """Groq's OpenAI-compatible API."""
+
+    BASE_URL = "https://api.groq.com/openai/v1/chat/completions"
+    VALIDATION_URL = "https://api.groq.com/openai/v1/models"
+    LOG_DIR_NAME = "groq_api_responses"
+
+    def __init__(
+        self,
+        api_key: str = "",
+        model: str = GROQ_MODEL,
+        timeout: int = GROQ_TIMEOUT,
+        gen_options: dict | None = None,
+    ):
+        super().__init__(api_key=api_key, model=model, timeout=timeout, gen_options=gen_options)
+
+    def _http_error_hint(self, status: int, details: str) -> str | None:
+        if "error code: 1010" in details.lower():
+            return (
+                "HTTP 403 (Cloudflare 1010): request blocked before reaching Groq API. "
+                "Try without VPN/proxy, allow direct HTTPS to api.groq.com, and retry."
+            )
+        return None
+
+
+# ── OpenRouter ───────────────────────────────────────────────────────────────
+
+class OpenRouterAIConnector(OpenAICompatConnector):
+    """
+    OpenRouter's OpenAI-compatible API.
+
+    Two deliberate differences from Groq:
+
+    * Validation hits ``/api/v1/key`` rather than ``/api/v1/models`` -- the
+      models listing is public and answers 200 to an unauthenticated request,
+      so it would happily "validate" a garbage key.
+    * ``HTTP-Referer``/``X-Title`` are OpenRouter's app-attribution headers.
+
+    Only ``temperature`` and ``top_p`` are sent (as for Groq).  ``top_k`` is
+    deliberately omitted: several free models -- Nemotron 3 Ultra among them --
+    do not accept it.
+    """
+
+    BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
+    VALIDATION_URL = "https://openrouter.ai/api/v1/key"
+    LOG_DIR_NAME = "openrouter_api_responses"
+
+    def __init__(
+        self,
+        api_key: str = "",
+        model: str = OPENROUTER_MODEL,
+        timeout: int = OPENROUTER_TIMEOUT,
+        gen_options: dict | None = None,
+    ):
+        super().__init__(api_key=api_key, model=model, timeout=timeout, gen_options=gen_options)
+
+    def _extra_headers(self) -> dict[str, str]:
+        return {
+            "HTTP-Referer": "https://github.com/peterferenc8-coder/AIMO",
+            "X-Title": "AIMO",
+        }
+
+    def _http_error_hint(self, status: int, details: str) -> str | None:
+        if status == 429:
+            return (
+                "HTTP 429: OpenRouter free-tier rate limit hit (20 requests/minute, and "
+                "50/day until the account has purchased $10 of credit -- then 1000/day). "
+                "Wait, lower the turn rate, or switch back to Groq/Google."
+            )
+        if status == 402:
+            return (
+                "HTTP 402: OpenRouter reports insufficient credit. Free models should not "
+                "charge -- check the selected model still ends in ':free'."
+            )
+        return None
