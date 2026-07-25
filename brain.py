@@ -42,9 +42,20 @@ class Brain:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def get_system_prompt(self, video_enabled: bool = True) -> str:
-        """Return the full system prompt. Call once at session start."""
-        return self._prompt_builder.get_system_prompt(video_enabled=video_enabled)
+    def get_system_prompt(
+        self,
+        video_enabled: bool = True,
+        device_type: str | None = None,
+    ) -> str:
+        """Return the full system prompt. Call once at session start.
+
+        ``device_type`` picks the DEVICE PROFILE block, so the monologue is
+        written for the hardware that is actually attached.
+        """
+        return self._prompt_builder.get_system_prompt(
+            video_enabled=video_enabled,
+            device_type=device_type,
+        )
 
     def build_seed_prompt(
         self,

@@ -24,6 +24,7 @@ from typing import Any
 from intent_compiler import IntentCompiler
 
 from device_bridge import get_bridge
+from devices.registry import get_active_type
 
 from config import (
     BIG_MODEL_RETRY_DELAY,
@@ -370,9 +371,20 @@ class SessionOrchestrator:
 
         # ── START SESSION: send system prompt once ─────────────────────────
         try:
-            system_prompt = self.brain.get_system_prompt(video_enabled=self.video_enabled)
+            # The device profile is baked into the system prompt, which is sent
+            # once, so the toy selected right now is the one the AI writes for.
+            # Switching devices mid-session does not re-issue it.
+            device_type = get_active_type()
+            system_prompt = self.brain.get_system_prompt(
+                video_enabled=self.video_enabled,
+                device_type=device_type,
+            )
             self.big_connector.start_session(system_prompt)
-            log.info("Started chat session with %s", self.big_connector.model)
+            log.info(
+                "Started chat session with %s (device profile: %s)",
+                self.big_connector.model,
+                device_type,
+            )
 
             # Send the seed prompt (persona, pacing, opening pattern)
             seed_prompt = self.brain.build_seed_prompt(
