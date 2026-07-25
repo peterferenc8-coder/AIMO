@@ -15,9 +15,11 @@ from typing import Any
 
 from config import (
     BANNED_PHRASE_WINDOW,
+    DEVICE_PROMPT_FALLBACK,
     EXAMPLES_DIR,
     PACING_STRATEGIES_FILE,
     PERSONA_MOODS_FILE,
+    PROMPT_DEVICES_DIR,
     PROMPT_FILE,
     USER_TURN_TASK_FILE,
 )
@@ -71,6 +73,21 @@ def _read_text_file(path: Path) -> str:
         return ""
 
 
+def get_device_block(device_type: str | None) -> str:
+    """Return the instruction block describing ``device_type``.
+
+    Falls back to the generic block when the type is unknown or has no file of
+    its own, so a newly added driver still produces a coherent prompt instead of
+    inheriting the previous device's physical vocabulary.
+    """
+    name = (device_type or DEVICE_PROMPT_FALLBACK).strip().lower()
+    block = _read_text_file(PROMPT_DEVICES_DIR / f"{name}.txt")
+    if not block and name != DEVICE_PROMPT_FALLBACK:
+        log.warning("No device prompt for %r; using %s", name, DEVICE_PROMPT_FALLBACK)
+        block = _read_text_file(PROMPT_DEVICES_DIR / f"{DEVICE_PROMPT_FALLBACK}.txt")
+    return block
+
+
 def get_persona_moods() -> list[str]:
     return _read_nonempty_lines(PERSONA_MOODS_FILE)
 
@@ -97,15 +114,22 @@ class PromptBuilder:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def get_system_prompt(self, video_enabled: bool = True) -> str:
+    def get_system_prompt(
+        self,
+        video_enabled: bool = True,
+        device_type: str | None = None,
+    ) -> str:
         """
         Return the full system prompt. Call this once at session start
         and pass it to connector.start_session().
 
         When ``video_enabled`` is False the play_video intent is dropped from
         the prompt so the AI is never offered it.
+
+        ``device_type`` selects the DEVICE PROFILE block (see get_device_block);
+        it is the registry's active device id, not a display name.
         """
-        return self._build_system_prompt(video_enabled)
+        return self._build_system_prompt(video_enabled, device_type)
 
     def build_user_prompt(
         self,
@@ -200,7 +224,7 @@ class PromptBuilder:
 
         # D) First turn instruction
         sections.append(
-            "The machine is stopped and at base. The User is ready. "
+            "The device is stopped and idle. The User is ready. "
             "Generate the first 5 outputs and actions."
         )
 
@@ -208,12 +232,25 @@ class PromptBuilder:
 
     # ── System prompt ─────────────────────────────────────────────────────────
 
-    def _build_system_prompt(self, video_enabled: bool = True) -> str:
+    def _build_system_prompt(
+        self,
+        video_enabled: bool = True,
+        device_type: str | None = None,
+    ) -> str:
         pattern_block = self.pattern_loader.to_prompt_block()
         prompt = self._base_prompt
 
         if "{{PATTERNS_BLOCK}}" in prompt:
             prompt = prompt.replace("{{PATTERNS_BLOCK}}", pattern_block)
+
+        if "{{DEVICE_BLOCK}}" in prompt:
+            device_block = get_device_block(device_type)
+            prompt = prompt.replace("{{DEVICE_BLOCK}}", device_block)
+            log.info(
+                "System prompt built for device %r (%d chars of profile)",
+                device_type or DEVICE_PROMPT_FALLBACK,
+                len(device_block),
+            )
 
         if "{{EXAMPLES_BLOCK}}" in prompt:
             prompt = prompt.replace("{{EXAMPLES_BLOCK}}", "\n\n".join(self._examples))

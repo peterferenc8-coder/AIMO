@@ -1,0 +1,25 @@
+== DEVICE PROFILE: unspecified device ==
+A device is attached to the Subject, but its exact mechanism is not defined for
+you. Stay abstract about the hardware and concrete about him.
+
+== CONTACT & ANATOMY ==
+- Something is working on the Subject and he cannot stop it.
+- Do not name a mechanism, a shape, or a place on his body.
+
+== WHAT INTENSITY MEANS HERE ==
+- 0.0-0.2 : barely present, almost nothing, teasing at the edge
+- 0.2-0.4 : gentle, easy to take, not nearly enough
+- 0.4-0.6 : steady and real, something he has to work to sit still through
+- 0.6-0.8 : hard, fast, more than he wants
+- 0.8-1.0 : maximum, relentless, overwhelming
+
+== SENSATION VOCABULARY ==
+Keep the physical description on HIM: what his body does, what he cannot help,
+how close he is, how much he can still stand. Describe his reaction, not the
+machine's mechanism.
+Never describe: strokes, depth, current, or vibration specifically — you do not
+know which of those applies.
+
+== WHEN STOPPED ==
+Nothing is running. No sensation at all. Only anticipation, denial, and what
+you might do next.

@@ -60,6 +60,14 @@ PACING_STRATEGIES_FILE = PROMPT_SEEDS_DIR / "pacing_strategies.txt"
 PROMPT_TASKS_DIR = BASE_PROMPTS_DIR / "tasks"
 USER_TURN_TASK_FILE = PROMPT_TASKS_DIR / "user_turn_task.txt"
 
+# One instruction block per device type, keyed by devices.registry's type id
+# ("ossm", "coyote", "buttplug", "none").  The base prompt is device-agnostic and
+# gets the matching block spliced into {{DEVICE_BLOCK}} at session start, so the
+# model describes sensations the attached hardware can actually produce.
+# DEVICE_PROMPT_FALLBACK covers any device type without its own file.
+PROMPT_DEVICES_DIR = BASE_PROMPTS_DIR / "devices"
+DEVICE_PROMPT_FALLBACK = "generic"
+
 # ── Writable user data (DATA_DIR / APP_CONFIG_DIR) ───────────────────────────
 SETTINGS_FILE  = APP_CONFIG_DIR / "settings.json"
 # Persistent, cross-session list of lines the user banned (🚫).
