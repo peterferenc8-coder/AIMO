@@ -1,7 +1,8 @@
 """
 ai_connector.py
 ---------------
-Thin wrappers around the Google, Groq and OpenRouter Generative AI APIs.
+Thin wrappers around the Google, Groq, OpenRouter and local (Ollama /
+OpenAI-compatible) Generative AI APIs.
 
 Now stateful: system prompt is set once per session, then only
 new user messages are sent each turn.
@@ -23,6 +24,10 @@ from config import (
     GROQ_MODEL,
     GROQ_TIMEOUT,
     LOGS_DIR,
+    OLLAMA_API_KEY,
+    OLLAMA_BASE_URL,
+    OLLAMA_MODEL,
+    OLLAMA_TIMEOUT,
     OPENROUTER_MODEL,
     OPENROUTER_TIMEOUT,
 )
@@ -36,6 +41,10 @@ class BaseAIConnector:
     """
     Shared machinery for API health tracking, validation, and response logging.
     """
+
+    # Shown when the back end lacks whatever it needs to be usable at all.
+    # Overridden by back ends whose credential is not an API key.
+    NOT_CONFIGURED_MESSAGE = "API key not configured"
 
     def __init__(self, *, api_key: str, model: str, timeout: int, log_dir_name: str,
                  gen_options: dict | None = None):
@@ -76,7 +85,7 @@ class BaseAIConnector:
         configured = self._is_configured()
         return {
             "ok": False if not configured else (True if self._last_api_ok is None else self._last_api_ok),
-            "message": "API key not configured" if not configured else self._last_api_message,
+            "message": self.NOT_CONFIGURED_MESSAGE if not configured else self._last_api_message,
             "model": self.model,
             "checked_at": self._last_api_checked_at,
             "session_active": self._session_active,
@@ -84,7 +93,7 @@ class BaseAIConnector:
 
     def validate_api_key(self) -> dict[str, Any]:
         if not self._is_configured():
-            self._mark_unhealthy(ValueError("API key not configured"))
+            self._mark_unhealthy(ValueError(self.NOT_CONFIGURED_MESSAGE))
             return self.health_check()
 
         try:
@@ -167,7 +176,10 @@ class BaseAIConnector:
 
     def _mark_unhealthy(self, exc: Exception) -> None:
         self._last_api_ok = False
-        self._last_api_message = str(exc)[:100]
+        # Generous enough for the hand-written provider hints (quota advice, "is
+        # the server running", the list of models actually installed) to survive
+        # intact -- at 100 they were being cut mid-sentence.
+        self._last_api_message = str(exc)[:300]
         self._last_api_checked_at = datetime.now(timezone.utc).isoformat()
 
     def _write_response_log(self, log_data: dict[str, Any]) -> None:
@@ -332,6 +344,12 @@ class OpenAICompatConnector(BaseAIConnector):
         """Return a friendlier message for a known provider-specific failure."""
         return None
 
+    def _url_error_hint(self, reason: Any) -> str | None:
+        """Return a friendlier message for a transport-level failure (DNS,
+        connection refused, TLS).  Mostly of interest to back ends whose host is
+        user-supplied, where a refused connection is the common first failure."""
+        return None
+
     def _is_configured(self) -> bool:
         return bool(self.api_key)
 
@@ -391,10 +409,14 @@ class OpenAICompatConnector(BaseAIConnector):
         content_type: str | None = None,
     ) -> dict[str, Any]:
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
             "Accept": "application/json",
             "User-Agent": "Aimee/1.0 (+local)",
         }
+        # Only sent when there is a key: a local endpoint typically wants no
+        # Authorization header at all, and the hosted back ends would reject an
+        # empty bearer token either way.
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         headers.update(self._extra_headers())
         if content_type:
             headers["Content-Type"] = content_type
@@ -421,7 +443,8 @@ class OpenAICompatConnector(BaseAIConnector):
 
             raise RuntimeError(f"HTTP {exc.code}: {details[:200]}") from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError(str(exc.reason)) from exc
+            hint = self._url_error_hint(exc.reason)
+            raise RuntimeError(hint or str(exc.reason)) from exc
 
     @staticmethod
     def _extract_text(response: dict[str, Any]) -> str:
@@ -511,3 +534,145 @@ class OpenRouterAIConnector(OpenAICompatConnector):
                 "charge -- check the selected model still ends in ':free'."
             )
         return None
+
+
+# ── Local OpenAI-compatible endpoint (Ollama & friends) ──────────────────────
+
+class OllamaAIConnector(OpenAICompatConnector):
+    """
+    A locally hosted OpenAI-compatible server.  Ollama is the reference target,
+    but LM Studio, llama.cpp's ``server`` and vLLM all speak the same dialect and
+    work unchanged -- only the base URL differs.
+
+    Three differences from the hosted siblings:
+
+    * **No API key.**  ``_is_configured`` keys off the base URL instead, and the
+      ``Authorization`` header is only sent when a key happens to be set (vLLM's
+      ``--api-key``, or a reverse proxy in front of Ollama).
+    * **User-supplied base URL**, so it is normalised: a scheme is added when
+      missing, a trailing slash or pasted ``/chat/completions`` is stripped, and
+      ``/v1`` is appended when absent.  ``http://localhost:11434`` and
+      ``http://localhost:11434/v1`` therefore both work.
+    * **No curated model list.**  A local server offers whatever has been pulled
+      onto the box, so ``list_models()`` reads ``GET /v1/models`` and validation
+      additionally checks that the selected model is actually installed --
+      otherwise the first real generation call would be the thing that
+      discovered the typo.  The discovered names are left on
+      ``available_models`` so a caller can cache them without a second request.
+    """
+
+    LOG_DIR_NAME = "ollama_api_responses"
+    NOT_CONFIGURED_MESSAGE = "No endpoint URL configured"
+
+    def __init__(
+        self,
+        api_key: str = OLLAMA_API_KEY,
+        model: str = OLLAMA_MODEL,
+        timeout: int = OLLAMA_TIMEOUT,
+        gen_options: dict | None = None,
+        base_url: str = OLLAMA_BASE_URL,
+    ):
+        # Set before super().__init__(), which reaches reconfigure() below.
+        self.root_url = ""
+        self.available_models: list[str] = []
+        super().__init__(api_key=api_key, model=model, timeout=timeout, gen_options=gen_options)
+        self.reconfigure(base_url=base_url)
+
+    def reconfigure(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        timeout: int | None = None,
+        gen_options: dict | None = None,
+        base_url: str | None = None,
+    ) -> None:
+        super().reconfigure(api_key=api_key, model=model, timeout=timeout, gen_options=gen_options)
+        if base_url is not None:
+            self.root_url = self._normalize_base_url(base_url)
+            self.base_url = f"{self.root_url}/chat/completions" if self.root_url else ""
+            self.validation_url = f"{self.root_url}/models" if self.root_url else ""
+
+    # ── Model discovery ───────────────────────────────────────────────────────
+
+    def list_models(self) -> list[str]:
+        """Model ids the server currently serves, sorted."""
+        if not self.root_url:
+            raise RuntimeError("No base URL configured")
+
+        response = self._call_validation()
+        entries = response.get("data") or []
+        names = {
+            str(entry["id"]).strip()
+            for entry in entries
+            if isinstance(entry, dict) and entry.get("id")
+        }
+        return sorted(names)
+
+    # ── Provider hooks ────────────────────────────────────────────────────────
+
+    def _is_configured(self) -> bool:
+        return bool(self.root_url)
+
+    def _do_validation_call(self) -> None:
+        self.available_models = self.list_models()
+
+        if not self.available_models:
+            raise RuntimeError(
+                f"Reached {self.root_url} but it serves no models "
+                "(for Ollama, pull one first: `ollama pull llama3.1:8b`)"
+            )
+
+        if self.model and self.model not in self.available_models:
+            preview = ", ".join(self.available_models[:5])
+            more = " ..." if len(self.available_models) > 5 else ""
+            raise RuntimeError(
+                f"Server reachable, but '{self.model}' is not installed. "
+                f"Available: {preview}{more}"
+            )
+
+    def _http_error_hint(self, status: int, details: str) -> str | None:
+        if status == 404:
+            return (
+                f"HTTP 404 from {self.root_url}. Check the base URL points at the server "
+                "root (e.g. http://localhost:11434) and that the model is installed "
+                "(`ollama list`)."
+            )
+        if status in (401, 403):
+            return (
+                f"HTTP {status} from {self.root_url}: the endpoint wants authentication. "
+                "Fill in the optional API key field."
+            )
+        return None
+
+    def _url_error_hint(self, reason: Any) -> str | None:
+        return (
+            f"Cannot reach {self.root_url or 'the configured endpoint'} ({reason}). "
+            "Is the server running? For Ollama, start it with `ollama serve` "
+            "(or the desktop app) and confirm the port."
+        )
+
+    @staticmethod
+    def _normalize_base_url(url: str) -> str:
+        """
+        Turn whatever the user typed into the OpenAI-compatible API root.
+
+        ``localhost:11434``, ``http://localhost:11434/``  and
+        ``http://localhost:11434/v1/chat/completions`` all become
+        ``http://localhost:11434/v1``.
+        """
+        cleaned = (url or "").strip().rstrip("/")
+        if not cleaned:
+            return ""
+
+        if "://" not in cleaned:
+            cleaned = f"http://{cleaned}"
+
+        for suffix in ("/chat/completions", "/completions"):
+            if cleaned.endswith(suffix):
+                cleaned = cleaned[: -len(suffix)]
+                break
+
+        if not cleaned.endswith("/v1"):
+            cleaned = f"{cleaned}/v1"
+
+        return cleaned

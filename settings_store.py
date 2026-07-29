@@ -24,6 +24,10 @@ from config import (
     VIDEO_CHANCE,
     GOOGLE_TIMEOUT,
     GROQ_TIMEOUT,
+    OLLAMA_API_KEY,
+    OLLAMA_BASE_URL,
+    OLLAMA_MODEL,
+    OLLAMA_TIMEOUT,
     OPENROUTER_MODEL,
     OPENROUTER_TIMEOUT,
     BIG_MODEL_MAX_RETRIES,
@@ -57,6 +61,14 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "google_model": "gemma-4-31b-it",
     "groq_model": "openai/gpt-oss-120b",
     "openrouter_model": OPENROUTER_MODEL,
+    # ── Local OpenAI-compatible endpoint (Ollama, LM Studio, llama.cpp, vLLM) ─
+    "ollama_base_url": OLLAMA_BASE_URL,
+    "ollama_api_key": OLLAMA_API_KEY,   # optional; blank for a stock Ollama
+    "ollama_model": OLLAMA_MODEL,
+    # Model ids discovered from the server's /v1/models the last time Test
+    # Connection ran.  Cached because model -> connector routing has to work
+    # without a live round-trip on every generation call.
+    "ollama_models": [],
     "tts_enabled": True,
     "stash_url": STASH_URL,
     "stash_api_key": STASH_API_KEY,
@@ -72,6 +84,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "google_timeout": GOOGLE_TIMEOUT,
     "groq_timeout": GROQ_TIMEOUT,
     "openrouter_timeout": OPENROUTER_TIMEOUT,
+    "ollama_timeout": OLLAMA_TIMEOUT,
     "big_model_max_retries": BIG_MODEL_MAX_RETRIES,
     "big_model_retry_delay": BIG_MODEL_RETRY_DELAY,
     # ── Session / pacing ───────────────────────────────────────────────────
@@ -113,6 +126,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "message": "Not validated yet",
         "checked_at": None,
     },
+    "ollama_validation": {
+        "ok": False,
+        "message": "Not validated yet",
+        "checked_at": None,
+    },
     "stash_validation": {
         "ok": False,
         "message": "Not validated yet",
@@ -149,6 +167,12 @@ def _as_int(value: Any, fallback: int, lo: int | None = None, hi: int | None = N
     return result
 
 
+def _as_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [text for text in (str(item).strip() for item in value) if text]
+
+
 def _normalized_validation(value: Any) -> dict[str, Any]:
     default = DEFAULT_SETTINGS["google_validation"]
     if not isinstance(value, dict):
@@ -168,6 +192,13 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
     settings["google_model"] = _as_clean_text(settings.get("google_model"))
     settings["groq_model"] = _as_clean_text(settings.get("groq_model"))
     settings["openrouter_model"] = _as_clean_text(settings.get("openrouter_model"))
+    # The base URL is only tidied here (whitespace, trailing slash); turning it
+    # into an API root is OllamaAIConnector's job, so the field keeps showing
+    # whatever the user actually typed.
+    settings["ollama_base_url"] = _as_clean_text(settings.get("ollama_base_url")).rstrip("/")
+    settings["ollama_api_key"] = _as_clean_text(settings.get("ollama_api_key"))
+    settings["ollama_model"] = _as_clean_text(settings.get("ollama_model"))
+    settings["ollama_models"] = _as_str_list(settings.get("ollama_models"))
     settings["tts_enabled"] = bool(settings.get("tts_enabled", d["tts_enabled"]))
     settings["stash_url"] = _as_clean_text(settings.get("stash_url")).rstrip("/")
     settings["stash_api_key"] = _as_clean_text(settings.get("stash_api_key"))
@@ -184,6 +215,7 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
     settings["google_timeout"] = _as_int(settings.get("google_timeout"), d["google_timeout"], 1, 3600)
     settings["groq_timeout"] = _as_int(settings.get("groq_timeout"), d["groq_timeout"], 1, 3600)
     settings["openrouter_timeout"] = _as_int(settings.get("openrouter_timeout"), d["openrouter_timeout"], 1, 3600)
+    settings["ollama_timeout"] = _as_int(settings.get("ollama_timeout"), d["ollama_timeout"], 1, 3600)
     settings["big_model_max_retries"] = _as_int(settings.get("big_model_max_retries"), d["big_model_max_retries"], 0, 20)
     settings["big_model_retry_delay"] = _as_int(settings.get("big_model_retry_delay"), d["big_model_retry_delay"], 0, 600)
 
@@ -221,6 +253,7 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
     settings["google_validation"] = _normalized_validation(settings.get("google_validation"))
     settings["groq_validation"] = _normalized_validation(settings.get("groq_validation"))
     settings["openrouter_validation"] = _normalized_validation(settings.get("openrouter_validation"))
+    settings["ollama_validation"] = _normalized_validation(settings.get("ollama_validation"))
     settings["stash_validation"] = _normalized_validation(settings.get("stash_validation"))
     return settings
 
@@ -233,6 +266,7 @@ def load_settings() -> dict[str, Any]:
             "google_model": os.getenv("GOOGLE_MODEL", settings["google_model"]),
             "groq_model": os.getenv("GROQ_MODEL", settings["groq_model"]),
             "openrouter_model": os.getenv("OPENROUTER_MODEL", settings["openrouter_model"]),
+            "ollama_model": os.getenv("OLLAMA_MODEL", settings["ollama_model"]),
         }
     )
 
@@ -274,8 +308,11 @@ def mask_secret(value: str | None) -> str:
 
 
 def provider_presence(settings: dict[str, Any]) -> dict[str, bool]:
+    """Whether each back end has the credential it needs to be usable at all.
+    For the local endpoint that credential is the base URL, not a key."""
     return {
         "google": bool(str(settings.get("google_api_key", "") or "").strip()),
         "groq": bool(str(settings.get("groq_api_key", "") or "").strip()),
         "openrouter": bool(str(settings.get("openrouter_api_key", "") or "").strip()),
+        "ollama": bool(str(settings.get("ollama_base_url", "") or "").strip()),
     }

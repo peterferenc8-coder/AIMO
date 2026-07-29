@@ -129,6 +129,24 @@ OPENROUTER_MODEL_OPTIONS = [
     "openai/gpt-oss-20b:free",
 ]
 
+# ── Local OpenAI-compatible endpoint (Ollama, LM Studio, llama.cpp, vLLM) ────
+# Ollama is the reference target, but nothing here is Ollama-specific beyond the
+# default port: any server speaking the OpenAI /v1/chat/completions dialect
+# works.  The URL is normalised in OllamaAIConnector, so "localhost:11434",
+# "http://localhost:11434" and ".../v1" all resolve to the same API root.
+#
+# Deliberately no curated model list: a local server serves whatever has been
+# pulled onto the box, so the list is discovered from GET /v1/models when Test
+# Connection is pressed and cached in settings under "ollama_models".
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "")
+# No key is needed for a stock Ollama install; set one only when the endpoint
+# sits behind an authenticating gateway (vLLM's --api-key, a reverse proxy).
+OLLAMA_API_KEY  = os.getenv("OLLAMA_API_KEY", "")
+# Local generation is far slower than a hosted API -- one call has to produce a
+# whole HIGH_WATERMARK batch, which a mid-range GPU can spend minutes on.
+OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT", "600"))
+
 # Generation hyperparameters
 GENERATION_OPTIONS = {
     "temperature":   float(os.getenv("GEN_TEMPERATURE",  "1.2")),

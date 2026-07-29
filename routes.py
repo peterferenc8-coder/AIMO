@@ -18,11 +18,17 @@ from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, render_template, request, send_file
 
-from ai_connector import GoogleAIConnector, GroqAIConnector, OpenRouterAIConnector
+from ai_connector import (
+    GoogleAIConnector,
+    GroqAIConnector,
+    OllamaAIConnector,
+    OpenRouterAIConnector,
+)
 from config import (
     AI_TO_DEVICE_PATTERN_MAP,
     GROQ_MODEL_OPTIONS,
     MODEL_OPTIONS,
+    OLLAMA_TIMEOUT,
     OPENROUTER_MODEL_OPTIONS,
 )
 from devices.registry import (
@@ -47,10 +53,11 @@ import tts
 # Non-secret scalar settings the Settings UI can read back and write.
 PLAIN_SETTING_KEYS = (
     "google_model", "groq_model", "openrouter_model", "tts_enabled",
+    "ollama_base_url", "ollama_model",
     "stash_url", "stash_tag", "stash_video_enabled",
     "stash_proxy_enabled", "stash_proxy_address", "video_chance",
     "gen_temperature", "gen_top_p", "gen_top_k",
-    "google_timeout", "groq_timeout", "openrouter_timeout",
+    "google_timeout", "groq_timeout", "openrouter_timeout", "ollama_timeout",
     "big_model_max_retries", "big_model_retry_delay",
     "default_turns", "banned_phrase_window", "display_interval",
     "low_watermark", "high_watermark", "generator_sleep",
@@ -60,7 +67,9 @@ PLAIN_SETTING_KEYS = (
     "coyote_soft_limit_a", "coyote_soft_limit_b", "coyote_freq_ms",
     "buttplug_ws_url", "buttplug_vibe_floor",
 )
-SECRET_SETTING_KEYS = ("google_api_key", "groq_api_key", "openrouter_api_key", "stash_api_key")
+SECRET_SETTING_KEYS = (
+    "google_api_key", "groq_api_key", "openrouter_api_key", "ollama_api_key", "stash_api_key",
+)
 
 from config import (
     CUSTOM_PATTERNS_DIR,
@@ -314,6 +323,8 @@ def _saved_settings_payload(settings: dict) -> dict:
         "google_key_present": bool(settings.get("google_api_key", "")),
         "groq_key_present": bool(settings.get("groq_api_key", "")),
         "openrouter_key_present": bool(settings.get("openrouter_api_key", "")),
+        "ollama_api_key_masked": mask_secret(settings.get("ollama_api_key", "")),
+        "ollama_model_options": settings.get("ollama_models", []),
         "stash_api_key_masked": mask_secret(settings.get("stash_api_key", "")),
         "stash_key_present": bool(str(settings.get("stash_api_key", "") or "").strip()),
     })
@@ -337,6 +348,13 @@ def _available_ai_models(settings: dict) -> list[str]:
     openrouter_present = bool(str(settings.get("openrouter_api_key", "") or "").strip())
     if openrouter_present and openrouter_valid:
         models.extend(OPENROUTER_MODEL_OPTIONS)
+
+    # The local endpoint has no curated list -- these are the model ids the
+    # server itself reported at the last successful Test.
+    ollama_valid = bool(settings.get("ollama_validation", {}).get("ok"))
+    ollama_present = bool(str(settings.get("ollama_base_url", "") or "").strip())
+    if ollama_present and ollama_valid:
+        models.extend(settings.get("ollama_models", []))
 
     return models
 
@@ -400,6 +418,7 @@ def register_routes(app: Flask) -> None:
         google_validation = _validation_from_settings(settings, "google_validation")
         groq_validation = _validation_from_settings(settings, "groq_validation")
         openrouter_validation = _validation_from_settings(settings, "openrouter_validation")
+        ollama_validation = _validation_from_settings(settings, "ollama_validation")
 
         payload = {
             "ok": True,
@@ -409,14 +428,19 @@ def register_routes(app: Flask) -> None:
             "google_key_present": presence["google"],
             "groq_key_present": presence["groq"],
             "openrouter_key_present": presence["openrouter"],
+            "ollama_api_key_masked": mask_secret(settings.get("ollama_api_key", "")),
+            "ollama_endpoint_present": presence["ollama"],
             "stash_api_key_masked": mask_secret(settings.get("stash_api_key", "")),
             "stash_key_present": bool(str(settings.get("stash_api_key", "") or "").strip()),
             "google_model_options": MODEL_OPTIONS,
             "groq_model_options": GROQ_MODEL_OPTIONS,
             "openrouter_model_options": OPENROUTER_MODEL_OPTIONS,
+            # Discovered, not curated — empty until the endpoint has been tested.
+            "ollama_model_options": settings.get("ollama_models", []),
             "google_validation": google_validation,
             "groq_validation": groq_validation,
             "openrouter_validation": openrouter_validation,
+            "ollama_validation": ollama_validation,
             "stash_validation": _validation_from_settings(settings, "stash_validation"),
             "prompt_names": list_base_prompt_names(),
         }
@@ -451,6 +475,8 @@ def register_routes(app: Flask) -> None:
             next_settings["groq_validation"] = pending
         if _changed(body, current, "openrouter_api_key", "openrouter_model"):
             next_settings["openrouter_validation"] = pending
+        if _changed(body, current, "ollama_api_key", "ollama_base_url", "ollama_model"):
+            next_settings["ollama_validation"] = pending
         if _changed(body, current, "stash_api_key", "stash_url", "stash_tag",
                     "stash_proxy_enabled", "stash_proxy_address"):
             next_settings["stash_validation"] = pending
@@ -470,6 +496,7 @@ def register_routes(app: Flask) -> None:
                 "google_validation": saved.get("google_validation"),
                 "groq_validation": saved.get("groq_validation"),
                 "openrouter_validation": saved.get("openrouter_validation"),
+                "ollama_validation": saved.get("ollama_validation"),
                 "stash_validation": saved.get("stash_validation"),
                 "tts_enabled": saved.get("tts_enabled", True),
                 "prompt_names": list_base_prompt_names(),
@@ -483,6 +510,7 @@ def register_routes(app: Flask) -> None:
         """Validate a single service using the saved credentials and persist
         the resulting validation state. Triggered by each service's Test button."""
         saved = load_settings()
+        discovered: list[str] | None = None
 
         if provider == "google":
             validation = _validate_google_key(
@@ -499,6 +527,15 @@ def register_routes(app: Flask) -> None:
                 saved.get("openrouter_api_key", ""), saved.get("openrouter_model", "")
             )
             saved["openrouter_validation"] = validation
+        elif provider == "ollama":
+            # The one Test that also discovers: a local server's model list is
+            # whatever has been pulled onto the box, so the same round-trip that
+            # proves reachability is what fills the model dropdowns. The list is
+            # cached even when validation fails (usually "that model isn't
+            # installed"), so the dropdown can show the user what *is* there.
+            validation, discovered = _validate_ollama_endpoint(saved)
+            saved["ollama_validation"] = validation
+            saved["ollama_models"] = discovered
         elif provider == "stash":
             client = StashClient(
                 url=saved.get("stash_url", ""),
@@ -513,7 +550,12 @@ def register_routes(app: Flask) -> None:
             return jsonify({"ok": False, "error": f"Unknown service '{provider}'"}), 400
 
         save_settings(saved)
-        return jsonify({"ok": True, "provider": provider, "validation": validation})
+        _orchestrator.apply_settings(load_settings())
+
+        payload = {"ok": True, "provider": provider, "validation": validation}
+        if discovered is not None:
+            payload["models"] = discovered
+        return jsonify(payload)
 
     @app.get("/api/prompts/<path:prompt_name>")
     def api_prompt_download(prompt_name: str):
@@ -1138,4 +1180,20 @@ def _validate_groq_key(api_key: str, model: str) -> dict:
 def _validate_openrouter_key(api_key: str, model: str) -> dict:
     connector = OpenRouterAIConnector(api_key=api_key, model=model)
     return connector.validate_api_key()
+
+
+def _validate_ollama_endpoint(settings: dict) -> tuple[dict, list[str]]:
+    """
+    Reach the local endpoint and report both its health and the models it
+    serves. One round-trip: validation is itself a GET /v1/models, and the
+    connector keeps the parsed list on ``available_models``.
+    """
+    connector = OllamaAIConnector(
+        api_key=settings.get("ollama_api_key", ""),
+        model=settings.get("ollama_model", ""),
+        timeout=settings.get("ollama_timeout", OLLAMA_TIMEOUT),
+        base_url=settings.get("ollama_base_url", ""),
+    )
+    validation = connector.validate_api_key()
+    return validation, connector.available_models
 

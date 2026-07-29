@@ -3,7 +3,8 @@
 AIMO is a Flask web application that drives interactive hardware (an **OSSM** linear
 actuator, a **DG-Lab Coyote 3.0** e-stim unit, or any toy exposed through
 **Buttplug/Intiface**) from an AI persona. A large language model (Google Gemini/Gemma,
-Groq-hosted, or OpenRouter-hosted models) generates a running stream of *turns* — each turn is a line of
+Groq-hosted, OpenRouter-hosted, or a local Ollama / OpenAI-compatible
+server) generates a running stream of *turns* — each turn is a line of
 speech plus a narrative **intent** and an **intensity**. The orchestrator translates
 those intents into concrete device motion, optionally speaks the text with local
 **Kokoro TTS** (re-timbred by an **RVC** voice-conversion pass and lip-synced onto a
@@ -25,6 +26,7 @@ of the Flask process.
   - [The two-loop orchestrator](#the-two-loop-orchestrator)
   - [Lifecycle of a turn](#lifecycle-of-a-turn)
   - [The AI consumer / connectors](#the-ai-consumer--connectors)
+  - [Local models (Ollama)](#local-models-ollama)
   - [Prompt system](#prompt-system)
   - [User feedback](#user-feedback)
   - [Intents and pattern translation](#intents-and-pattern-translation)
@@ -47,7 +49,7 @@ of the Flask process.
 ## Features
 
 - **AI-generated sessions** — a persona produces speech + intent + intensity per turn, paced and de-duplicated to avoid repetition.
-- **Three AI back ends** — Google Generative AI (Gemini/Gemma), Groq, and OpenRouter (free-tier models), switchable per session.
+- **Four AI back ends** — Google Generative AI (Gemini/Gemma), Groq, OpenRouter (free-tier models), and any local OpenAI-compatible server (Ollama, LM Studio, llama.cpp, vLLM) — switchable per session.
 - **Intent → motion compiler** — narrative intents (`tease`, `build`, `reward`, `settle`, `stop`) plus a 0.0–1.0 intensity are compiled to concrete device commands via per-intent JSON "bands" with weighted random variations.
 - **Multiple devices** — OSSM (WebSocket or serial), Coyote 3.0 (BLE), and Buttplug/Intiface toys, behind a common device abstraction with a live state stream.
 - **Stash media server** — pull random tagged scenes, proxy their video through Flask (keeping the API key server-side), and drive the device from each scene's funscript. Optional SOCKS5 tunnelling.
@@ -86,7 +88,8 @@ On Windows, just double-click `AIMO-windows-x86_64.exe`.
 The app starts a local server and **opens your browser automatically** at
 <http://localhost:5000>. To set up an AI back end, open the **Settings** tab, paste a
 Google, Groq and/or OpenRouter API key, **Save All**, then press **Test Connection**.
-Once a key validates, its models unlock on the **AI Session** tab.
+Once a key validates, its models unlock on the **AI Session** tab. For a fully local
+setup, fill in the **Local (Ollama)** card's base URL instead — no key required.
 
 > **Where your data lives.** The binary is self-contained and read-only; everything
 > you create or change at runtime — settings, custom patterns, uploaded
@@ -136,7 +139,8 @@ virtualenv under `RVC/` (without it, you get plain Kokoro audio), and the
 
 To set up an AI back end, open the **Settings** tab, paste a Google, Groq and/or
 OpenRouter API key, **Save All**, then press **Test Connection**. Once a key validates,
-its models unlock for selection on the **AI Session** tab.
+its models unlock for selection on the **AI Session** tab. To run the model locally
+instead, see [Local models (Ollama)](#local-models-ollama) — no key needed.
 
 ---
 
@@ -204,7 +208,7 @@ Key modules:
 | `main.py` / `app_factory.py` | Entry point and Flask app factory (logging, route registration, default device). |
 | `routes.py` | Every HTTP endpoint; owns the single `SessionOrchestrator` instance and the `FunscriptPlayer`. |
 | `orchestrator.py` | The heart: producer/consumer loops, session lifecycle, settings application. |
-| `ai_connector.py` | Stateful wrappers around the Google, Groq and OpenRouter chat APIs. |
+| `ai_connector.py` | Stateful wrappers around the Google, Groq, OpenRouter and local (Ollama) chat APIs. |
 | `brain.py` / `prompt_builder.py` | Compose the system prompt, seed prompt, and per-turn prompts. |
 | `response_parser.py` | Extract structured turns (speech/intent/intensity) from raw model text. |
 | `intent_compiler.py` | Map `(intent, intensity)` → concrete device command. |
@@ -241,15 +245,60 @@ The browser drives the UI by polling `GET /api/poll?since=<index>`, which return
 `ai_connector.py` defines a `BaseAIConnector` with these concrete subclasses:
 
 - **`GoogleAIConnector`** — uses `google-genai` chat sessions; the system prompt is set once via `start_session`, then each turn sends only a small user prompt.
-- **`OpenAICompatConnector`** — shared client for any OpenAI-compatible `/chat/completions` endpoint, using only the stdlib and maintaining the message history internally, trimmed to a bounded window (`MAX_HISTORY`). Subclasses supply the endpoints plus, where needed, extra request headers (`_extra_headers`) and friendlier messages for provider-specific HTTP failures (`_http_error_hint`):
+- **`OpenAICompatConnector`** — shared client for any OpenAI-compatible `/chat/completions` endpoint, using only the stdlib and maintaining the message history internally, trimmed to a bounded window (`MAX_HISTORY`). Subclasses supply the endpoints plus, where needed, extra request headers (`_extra_headers`) and friendlier messages for provider-specific HTTP (`_http_error_hint`) or transport (`_url_error_hint`) failures:
   - **`GroqAIConnector`** — Groq. Translates the Cloudflare 1010 block into an actionable hint.
   - **`OpenRouterAIConnector`** — OpenRouter, restricted to zero-cost `:free` models. Two deliberate differences: validation hits `/api/v1/key` rather than `/api/v1/models`, because the models listing is public and answers `200` to an unauthenticated request (it would "validate" any garbage key); and 429/402 responses are rewritten to explain the free-tier quota.
+  - **`OllamaAIConnector`** — a locally hosted endpoint; see [Local models (Ollama)](#local-models-ollama).
+
+The `Authorization` header is only sent when a key is actually set, so a keyless local endpoint is not handed an empty bearer token.
 
 Only `temperature` and `top_p` are sent to the OpenAI-compatible back ends — `top_k` is deliberately omitted, as several free OpenRouter models (Nemotron 3 Ultra among them) reject it.
 
 **OpenRouter free-tier quota.** The free pool allows **20 requests/minute** and **50 requests/day**, rising to **1000/day** once the account has ever purchased $10 of credit. One generation call covers `high_watermark` turns, so at the defaults (10 turns per batch, a 10 s display interval) a session burns roughly 36 calls/hour — about 1.4 hours/day on the base allowance. The large reasoning models are also markedly slower than Groq; keep `openrouter_timeout` generous.
 
 All are **stateful** (system prompt sent once per session), expose `validate_api_key()` / `health_check()`, and carry their own `gen_options` (temperature/top-p/top-k) and `timeout`, which the orchestrator pushes from settings via `reconfigure()`. Failed big-model calls are retried up to `big_model_max_retries` times with `big_model_retry_delay` between attempts (interruptible by a stop request).
+
+### Local models (Ollama)
+
+The **Local (Ollama)** settings card points at any server speaking the OpenAI
+`/v1/chat/completions` dialect. Ollama is the reference target, but LM Studio,
+llama.cpp's `server` and vLLM work unchanged — only the base URL differs. Nothing
+leaves the machine and there are no rate limits or quotas.
+
+```bash
+ollama serve            # or just run the desktop app
+ollama pull qwen3:8b
+```
+
+Then in **Settings ▸ Local (Ollama)** set the base URL (default
+`http://localhost:11434`), press **Test Connection**, pick a model, and **Save All**.
+
+Three things work differently from the hosted back ends:
+
+- **No API key.** The back end is gated on the base URL instead. The optional key field
+  is only for endpoints behind an authenticating gateway (vLLM's `--api-key`, a reverse
+  proxy).
+- **The base URL is normalised.** A missing scheme is added, and a trailing slash or a
+  pasted `/chat/completions` is stripped, with `/v1` appended when absent — so
+  `localhost:11434`, `http://localhost:11434` and `http://localhost:11434/v1` are all
+  the same endpoint. Point it at another machine on the LAN if that is where the GPU is.
+- **The model list is discovered, not curated.** A local server offers whatever has been
+  pulled onto the box, so **Test Connection** doubles as discovery: it reads
+  `GET /v1/models`, caches the result in settings (`ollama_models`), and unlocks the
+  dropdowns. Pull a new model and press Test again to pick it up. Validation also fails
+  if the *selected* model is not installed, so a typo surfaces at Test time rather than
+  mid-session — and the list is cached even on that failure, so the dropdown then shows
+  you what is actually there.
+
+Because discovery is verbatim, embedding-only models (`nomic-embed-text` and friends)
+appear in the list too; picking one will fail at generation time.
+
+**Practical notes.** One generation call has to produce a whole `high_watermark` batch,
+which a local model can spend minutes on — hence the much larger default
+`ollama_timeout` (600 s vs 240 s for the hosted back ends). The system prompt is also
+substantial (~11 k characters before examples), so a model running with a small context
+window will silently truncate it and produce off-format turns; set Ollama's context
+length via `OLLAMA_CONTEXT_LENGTH` or a Modelfile if turns come back unparseable.
 
 ### Prompt system
 
@@ -425,13 +474,15 @@ environment variable); saved settings then override those, and values are
 **range-clamped and normalized** on save.
 
 The **Settings tab** edits everything through one **global Save All** button with an
-unsaved-changes indicator. Service cards (Google, Groq, OpenRouter, Stash) additionally have a
+unsaved-changes indicator. Service cards (Google, Groq, OpenRouter, Local/Ollama, Stash)
+additionally have a
 **Test Connection** button that validates just that service and updates the status panel
 on the right — saving stays fast and never blocks on the network, while tests own
 connectivity checks. Changing a credential resets that service's stored validation to
 "pending".
 
-Settings categories: **Google AI**, **Groq AI**, **OpenRouter**, **Generation** (temperature, top-p,
+Settings categories: **Google AI**, **Groq AI**, **OpenRouter**, **Local (Ollama)** (base URL,
+optional key, discovered model), **Generation** (temperature, top-p,
 top-k, timeouts, retries), **Session & Pacing** (turns, watermarks,
 display interval, generator sleep, banned-phrase window), **Text-to-Speech** (enable,
 voice, speed, device), **Stash** (enable + interlude chance, URL, key, tag, SOCKS5),
@@ -513,7 +564,7 @@ Selected endpoints (see `routes.py` for the full set):
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` / `POST` | `/api/settings` | Read all settings / save all settings. |
-| `POST` | `/api/settings/test/<google\|groq\|openrouter\|stash>` | Validate one service. |
+| `POST` | `/api/settings/test/<google\|groq\|openrouter\|ollama\|stash>` | Validate one service. `ollama` also returns the discovered `models` list. |
 | `GET` / `POST` | `/api/prompts/<name>` | Download / upload an override. |
 | `POST` | `/api/prompts/revert` | Delete all overrides. |
 | `GET`  | `/api/intents` | List intents and intensity coverage. |
@@ -553,7 +604,7 @@ AIMO/
 ├── config.py               # Central defaults (env-overridable); pattern→slot map
 ├── settings_store.py       # Local settings load / normalize / save
 ├── orchestrator.py         # Producer/consumer loops + session lifecycle
-├── ai_connector.py         # Google, Groq & OpenRouter stateful chat connectors
+├── ai_connector.py         # Google, Groq, OpenRouter & local/Ollama stateful chat connectors
 ├── brain.py                # Session/creative coordinator
 ├── prompt_builder.py       # System / seed / per-turn prompt construction
 ├── prompt_store.py         # base/current prompt resolution
@@ -600,8 +651,10 @@ editable at runtime from the Settings tab (which persists to
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GOOGLE_MODEL` / `GROQ_MODEL` / `OPENROUTER_MODEL` | Default model per provider | `gemma-4-31b-it` / `openai/gpt-oss-120b` / `nvidia/nemotron-3-ultra-550b-a55b:free` |
+| `OLLAMA_BASE_URL` / `OLLAMA_MODEL` / `OLLAMA_API_KEY` | Local OpenAI-compatible endpoint (key optional) | `http://localhost:11434` / _(none)_ / _(none)_ |
 | `GEN_TEMPERATURE` / `GEN_TOP_P` / `GEN_TOP_K` | Generation sampling | `1.2` / `0.90` / `60` |
 | `GOOGLE_TIMEOUT` / `GROQ_TIMEOUT` / `OPENROUTER_TIMEOUT` | API timeouts (s) | `240` / `240` / `240` |
+| `OLLAMA_TIMEOUT` | Local endpoint timeout (s) — a local batch is slow | `600` |
 | `BIG_MAX_RETRIES` / `BIG_RETRY_DELAY` | Big-model retry policy | `3` / `30` |
 | `DEFAULT_TURNS` | Default session length | `5` |
 | `BANNED_PHRASE_WINDOW` | Recent lines fed back as "do not repeat" | `20` |
@@ -646,7 +699,8 @@ missing, and a feature that needs one surfaces a clear error only when first use
 instance, reports as unavailable in the prebuilt binary). A few more extras remain
 install-as-needed:
 
-- **Groq / OpenRouter** — none beyond the stdlib (both use `urllib`).
+- **Groq / OpenRouter / local (Ollama)** — none beyond the stdlib (all use `urllib`).
+  A local endpoint additionally needs the server itself running (e.g. `ollama serve`).
 - **Buttplug/Intiface** — none beyond `websockets` (already core); needs
   [Intiface Central](https://intiface.com/central/) running with its server enabled.
 - **RVC voice conversion** — an [Applio](https://github.com/IAHispano/Applio) checkout
