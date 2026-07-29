@@ -23,7 +23,7 @@
         <label for="ai-model">Model</label>
         <select id="ai-model">
           {% if not model_options %}
-          <option value="" selected disabled>No validated provider key available</option>
+          <option value="" selected disabled>No validated provider available</option>
           {% endif %}
           {% for model in model_options %}
           <option value="{{ model }}" {% if model==selected_model %}selected{% endif %}>{{ model }}</option>

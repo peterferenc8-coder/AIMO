@@ -4,6 +4,11 @@ const $$settings = (sel) => Array.from(document.querySelectorAll(sel));
 // Every AI back end that follows the key → Test → unlock model dropdown flow.
 const AI_PROVIDERS = ['google', 'groq', 'openrouter'];
 
+// The local OpenAI-compatible endpoint sits outside that flow: it is gated on a
+// base URL rather than a key, and its model list is discovered from the server
+// at Test time instead of being curated in config.
+const LOCAL_PROVIDER = 'ollama';
+
 const settingsState = {
   promptNames: [],
   keyPresent: Object.fromEntries(AI_PROVIDERS.map((p) => [p, false])),
@@ -19,6 +24,10 @@ const SETTING_HELP = {
   openrouter_api_key: 'Your OpenRouter API key. Stored locally. Only zero-cost ":free" models are offered.',
   openrouter_model: 'Which OpenRouter model generates turns. Unlocks once a valid key is saved and tested. Free models are capped at 20 requests/minute and 50/day (1000/day once the account has purchased $10 of credit).',
   openrouter_timeout: 'Seconds to wait for an OpenRouter response. Large reasoning models are far slower than Groq — leave this generous.',
+  ollama_base_url: 'Address of a local OpenAI-compatible server — Ollama (http://localhost:11434), LM Studio (http://localhost:1234), llama.cpp or vLLM. A trailing "/v1" is optional.',
+  ollama_api_key: 'Optional. A stock Ollama install needs no key; set one only if the endpoint sits behind an authenticating gateway or vLLM --api-key.',
+  ollama_model: 'Which locally hosted model generates turns. The list is read from the server itself — press Test Connection to refresh it after pulling a new model.',
+  ollama_timeout: 'Seconds to wait for a local response. One call generates a whole batch of turns, which a local model can spend minutes on — keep this well above the hosted timeouts.',
   gen_temperature: 'Sampling temperature (0–2). Higher is more random/creative, lower is more focused.',
   gen_top_p: 'Nucleus sampling (0–1). Restricts choices to the most probable tokens by cumulative probability.',
   gen_top_k: 'Top-k sampling. Restricts choices to the k most likely tokens (0 disables it).',
@@ -139,6 +148,49 @@ function syncModelLock(provider) {
   }
 }
 
+// ── Local endpoint (no key, discovered model list) ───────────────────────────
+
+// The saved model is kept in the list even when it is absent from the last
+// discovery, so a Save All before the first successful Test cannot silently
+// wipe it (a <select> with no matching option reports an empty value).
+function localModelOptions(discovered, saved) {
+  const options = Array.from(discovered || []);
+  if (saved && !options.includes(saved)) options.unshift(saved);
+  return options;
+}
+
+function syncLocalModelLock(count) {
+  const select = $settings(`settings-${LOCAL_PROVIDER}-model`);
+  const status = $settings(`settings-${LOCAL_PROVIDER}-model-status`);
+  if (select) select.disabled = count === 0;
+  if (status) {
+    status.textContent = count
+      ? `${count} model${count === 1 ? '' : 's'} available`
+      : 'Press Test Connection to load the models installed on the server';
+  }
+  const sideCount = $settings(`settings-${LOCAL_PROVIDER}-model-count`);
+  if (sideCount) sideCount.textContent = count ? String(count) : 'None discovered';
+}
+
+function applyLocalPanel(data) {
+  const discovered = data[`${LOCAL_PROVIDER}_model_options`] || [];
+  const status = $settings(`settings-${LOCAL_PROVIDER}-status`);
+  if (status) {
+    status.textContent = data[`${LOCAL_PROVIDER}_endpoint_present`]
+      ? (discovered.length ? 'Endpoint saved' : 'Endpoint saved — not tested yet')
+      : 'No endpoint configured';
+  }
+
+  const validation = data[`${LOCAL_PROVIDER}_validation`];
+  setValidationState(
+    LOCAL_PROVIDER,
+    validation?.ok ? 'Reachable' : (validation?.message || 'Not validated'),
+    validation?.ok
+  );
+
+  syncLocalModelLock(localModelOptions(discovered, data[`${LOCAL_PROVIDER}_model`]).length);
+}
+
 // ── Generic field <-> settings mapping ──────────────────────────────────────
 
 function fillSettingFields(data) {
@@ -208,6 +260,7 @@ function applyStatusPanel(data) {
   );
 
   for (const provider of AI_PROVIDERS) syncModelLock(provider);
+  applyLocalPanel(data);
 }
 
 // ── Load ──────────────────────────────────────────────────────────────────────
@@ -222,6 +275,11 @@ async function loadSettings() {
   populateSelect($settings('settings-google-model'), data.google_model_options || [], data.google_model || '');
   populateSelect($settings('settings-groq-model'), data.groq_model_options || [], data.groq_model || '');
   populateSelect($settings('settings-openrouter-model'), data.openrouter_model_options || [], data.openrouter_model || '');
+  populateSelect(
+    $settings('settings-ollama-model'),
+    localModelOptions(data.ollama_model_options, data.ollama_model),
+    data.ollama_model || ''
+  );
   populateSelect($settings('settings-prompt-name'), settingsState.promptNames, settingsState.promptNames[0] || '');
 
   fillSettingFields(data);
@@ -281,6 +339,16 @@ async function testService(provider) {
   if (AI_PROVIDERS.includes(provider)) {
     settingsState.keyPresent[provider] = settingsState.keyPresent[provider] || v.ok;
     syncModelLock(provider);
+  }
+  if (provider === LOCAL_PROVIDER) {
+    // The test doubles as model discovery. Repopulate even on failure — the
+    // usual failure is "that model isn't installed", and the list is what tells
+    // the user which ones are.
+    const select = $settings(`settings-${LOCAL_PROVIDER}-model`);
+    const current = select ? select.value : '';
+    const options = localModelOptions(data.models, current);
+    populateSelect(select, options, current);
+    syncLocalModelLock(options.length);
   }
   setGlobalStatus(v.ok ? `${provider} connected.` : `${provider}: ${v.message || 'failed'}.`, !v.ok);
 }

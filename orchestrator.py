@@ -37,12 +37,20 @@ from config import (
     HIGH_WATERMARK,
     LOW_WATERMARK,
     MODEL_OPTIONS,
+    OLLAMA_BASE_URL,
+    OLLAMA_MODEL,
+    OLLAMA_TIMEOUT,
     OPENROUTER_MODEL,
     OPENROUTER_MODEL_OPTIONS,
     OPENROUTER_TIMEOUT,
     VIDEO_CHANCE,
 )
-from ai_connector import GoogleAIConnector, GroqAIConnector, OpenRouterAIConnector
+from ai_connector import (
+    GoogleAIConnector,
+    GroqAIConnector,
+    OllamaAIConnector,
+    OpenRouterAIConnector,
+)
 from brain import Brain
 from feedback_store import add_banned_phrase, remove_banned_phrase
 from response_parser import Commands, ResponseParser, Turn
@@ -131,6 +139,13 @@ class SessionOrchestrator:
             api_key=self._settings.get("openrouter_api_key", ""),
             model=self._settings.get("openrouter_model", OPENROUTER_MODEL),
             timeout=self._settings.get("openrouter_timeout", OPENROUTER_TIMEOUT),
+            gen_options=self._gen_options(),
+        )
+        self.ollama_connector = OllamaAIConnector(
+            api_key=self._settings.get("ollama_api_key", ""),
+            model=self._settings.get("ollama_model", OLLAMA_MODEL),
+            timeout=self._settings.get("ollama_timeout", OLLAMA_TIMEOUT),
+            base_url=self._settings.get("ollama_base_url", OLLAMA_BASE_URL),
             gen_options=self._gen_options(),
         )
 
@@ -252,6 +267,13 @@ class SessionOrchestrator:
             api_key=self._settings.get("openrouter_api_key", ""),
             model=self._settings.get("openrouter_model", self.openrouter_connector.model),
             timeout=self._settings.get("openrouter_timeout", OPENROUTER_TIMEOUT),
+            gen_options=gen,
+        )
+        self.ollama_connector.reconfigure(
+            api_key=self._settings.get("ollama_api_key", ""),
+            model=self._settings.get("ollama_model", self.ollama_connector.model),
+            timeout=self._settings.get("ollama_timeout", OLLAMA_TIMEOUT),
+            base_url=self._settings.get("ollama_base_url", OLLAMA_BASE_URL),
             gen_options=gen,
         )
         active_model = self.big_connector.model
@@ -898,9 +920,19 @@ class SessionOrchestrator:
     def _is_openrouter_model(model: str) -> bool:
         return model in OPENROUTER_MODEL_OPTIONS
 
+    def _is_ollama_model(self, model: str) -> bool:
+        # Unlike the hosted back ends there is no curated list to match against:
+        # the names are whatever the local server reported at the last Test, so
+        # the check reads the cached list out of settings.
+        return model in self._settings.get("ollama_models", [])
+
     def _connector_for_model(self, model: str):
+        # The hosted lists are curated and fixed, so they win any (vanishingly
+        # unlikely) name clash with a locally installed model.
         if self._is_openrouter_model(model):
             return self.openrouter_connector
         if self._is_groq_model(model):
             return self.groq_connector
+        if self._is_ollama_model(model):
+            return self.ollama_connector
         return self.google_connector

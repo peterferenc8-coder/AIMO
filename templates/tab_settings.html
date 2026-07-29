@@ -73,11 +73,45 @@
       </div>
     </div>
 
+    <!-- ── Local / Ollama ────────────────────────────────────────────────── -->
+    <div class="settings-card">
+      <h3>Local (Ollama)</h3>
+      <p class="settings-note">Any server speaking the OpenAI <code>/v1/chat/completions</code> dialect — Ollama,
+        LM Studio, llama.cpp's server or vLLM. No API key is needed for a stock Ollama install; press
+        <strong>Test</strong> to reach the server and load the list of models it actually has installed.
+        Nothing leaves the machine, and there are no rate limits — but a local model is far slower per batch,
+        so leave the timeout generous.</p>
+
+      <div class="settings-field">
+        <label for="settings-ollama-base-url">Base URL</label>
+        <input type="text" id="settings-ollama-base-url" data-setting="ollama_base_url"
+               autocomplete="off" spellcheck="false" placeholder="http://localhost:11434" />
+        <div class="settings-status" id="settings-ollama-status">Not loaded</div>
+      </div>
+
+      <div class="settings-field">
+        <label for="settings-ollama-key">API Key (optional)</label>
+        <input type="password" id="settings-ollama-key" data-setting="ollama_api_key" data-secret="true"
+               autocomplete="off" spellcheck="false" placeholder="Only needed behind an authenticating gateway" />
+      </div>
+
+      <div class="settings-field">
+        <label for="settings-ollama-model">Local Model</label>
+        <select id="settings-ollama-model" data-setting="ollama_model" disabled></select>
+        <div class="settings-status" id="settings-ollama-model-status">Press Test to load installed models</div>
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn btn-secondary" id="settings-test-ollama" data-test="ollama">Test Connection</button>
+      </div>
+    </div>
+
     <!-- ── Generation ────────────────────────────────────────────────────── -->
     <div class="settings-card">
       <h3>Generation</h3>
-      <p class="settings-note">Sampling and model behaviour for generated turns. Applies to Google, Groq and OpenRouter.
-        Top-k is only sent to Google — the OpenAI-compatible back ends take temperature and top-p alone.</p>
+      <p class="settings-note">Sampling and model behaviour for generated turns. Applies to every back end.
+        Top-k is only sent to Google — the OpenAI-compatible back ends (Groq, OpenRouter, Ollama) take
+        temperature and top-p alone.</p>
 
       <div class="settings-grid">
         <div class="settings-field">
@@ -111,6 +145,11 @@
         <div class="settings-field">
           <label for="settings-openrouter-timeout">OpenRouter Timeout (s)</label>
           <input type="number" id="settings-openrouter-timeout" data-setting="openrouter_timeout" data-type="number"
+                 min="1" max="3600" step="1" />
+        </div>
+        <div class="settings-field">
+          <label for="settings-ollama-timeout">Local Timeout (s)</label>
+          <input type="number" id="settings-ollama-timeout" data-setting="ollama_timeout" data-type="number"
                  min="1" max="3600" step="1" />
         </div>
       </div>
@@ -343,6 +382,8 @@
       <div class="settings-status-line"><span>Groq validation</span><strong id="settings-groq-validation-state">Unknown</strong></div>
       <div class="settings-status-line"><span>OpenRouter key</span><strong id="settings-openrouter-key-state">Unknown</strong></div>
       <div class="settings-status-line"><span>OpenRouter validation</span><strong id="settings-openrouter-validation-state">Unknown</strong></div>
+      <div class="settings-status-line"><span>Local endpoint</span><strong id="settings-ollama-validation-state">Unknown</strong></div>
+      <div class="settings-status-line"><span>Local models</span><strong id="settings-ollama-model-count">Unknown</strong></div>
       <div class="settings-status-line"><span>Stash</span><strong id="settings-stash-validation-state">Unknown</strong></div>
       <div class="settings-status-line"><span>Current prompt set</span><strong id="settings-prompt-count">0 files</strong></div>
     </div>
