@@ -105,6 +105,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "rvc_index_rate": RVC_INDEX_RATE,
     # ── Device / hardware ──────────────────────────────────────────────────
     "device_ws_url": DEFAULT_DEVICE_WS_URL,
+    # Stock-firmware OSSM is BLE-only, so it remembers a MAC rather than a URL.
+    "ossm_ble_address": "",
     "coyote_ble_name": COYOTE_BLE_NAME,
     "coyote_soft_limit_a": COYOTE_SOFT_LIMIT_A,
     "coyote_soft_limit_b": COYOTE_SOFT_LIMIT_B,
@@ -242,6 +244,9 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
     # Device / hardware
     settings["device_ws_url"] = _as_clean_text(settings.get("device_ws_url")) or d["device_ws_url"]
+    # No fallback: an empty address means "not paired yet", which the setup tab
+    # needs to distinguish from a stale one.
+    settings["ossm_ble_address"] = _as_clean_text(settings.get("ossm_ble_address"))
     settings["coyote_ble_name"] = _as_clean_text(settings.get("coyote_ble_name")) or d["coyote_ble_name"]
     settings["coyote_soft_limit_a"] = _as_int(settings.get("coyote_soft_limit_a"), d["coyote_soft_limit_a"], 0, 200)
     settings["coyote_soft_limit_b"] = _as_int(settings.get("coyote_soft_limit_b"), d["coyote_soft_limit_b"], 0, 200)

@@ -73,6 +73,14 @@ def _read_text_file(path: Path) -> str:
         return ""
 
 
+# Drivers that differ only in transport, not in what the hardware can do, share
+# one device block. Keeping the alias here rather than duplicating the file
+# stops the two copies drifting apart.
+DEVICE_PROMPT_ALIASES = {
+    "ossm_ble": "ossm",
+}
+
+
 def get_device_block(device_type: str | None) -> str:
     """Return the instruction block describing ``device_type``.
 
@@ -81,6 +89,7 @@ def get_device_block(device_type: str | None) -> str:
     inheriting the previous device's physical vocabulary.
     """
     name = (device_type or DEVICE_PROMPT_FALLBACK).strip().lower()
+    name = DEVICE_PROMPT_ALIASES.get(name, name)
     block = _read_text_file(PROMPT_DEVICES_DIR / f"{name}.txt")
     if not block and name != DEVICE_PROMPT_FALLBACK:
         log.warning("No device prompt for %r; using %s", name, DEVICE_PROMPT_FALLBACK)

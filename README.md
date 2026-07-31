@@ -51,7 +51,7 @@ of the Flask process.
 - **AI-generated sessions** — a persona produces speech + intent + intensity per turn, paced and de-duplicated to avoid repetition.
 - **Four AI back ends** — Google Generative AI (Gemini/Gemma), Groq, OpenRouter (free-tier models), and any local OpenAI-compatible server (Ollama, LM Studio, llama.cpp, vLLM) — switchable per session.
 - **Intent → motion compiler** — narrative intents (`tease`, `build`, `reward`, `settle`, `stop`) plus a 0.0–1.0 intensity are compiled to concrete device commands via per-intent JSON "bands" with weighted random variations.
-- **Multiple devices** — OSSM (WebSocket or serial), Coyote 3.0 (BLE), and Buttplug/Intiface toys, behind a common device abstraction with a live state stream.
+- **Multiple devices** — OSSM on custom firmware (WebSocket or serial) or stock KinkyMakers firmware (BLE), Coyote 3.0 (BLE), and Buttplug/Intiface toys, behind a common device abstraction with a live state stream.
 - **Stash media server** — pull random tagged scenes, proxy their video through Flask (keeping the API key server-side), and drive the device from each scene's funscript. Optional SOCKS5 tunnelling.
 - **Funscript playback** — upload/load `.funscript` files or play scene funscripts, with seek/pause/resume and latency/invert tuning.
 - **Local TTS** — Kokoro synthesizes speech with word-level timing so the UI highlights each word as it is spoken, plus a phoneme-aligned viseme track.
@@ -365,6 +365,9 @@ stream live state to the browser over SSE. A `registry` keeps a single active de
 swaps implementations on request.
 
 - **`OSSMDevice`** — connects over **WebSocket** (default `ws://localhost:8888`) or **serial** (auto-detected from a `/dev/…`, `COM…`, `tty…`, or `/tmp/…` address). It reconnects with exponential backoff and forwards raw position messages to listeners. A standalone `device_emulator.py` and a one-click serial-PTY emulator (`socat` + emulator) allow development without hardware.
+- **`OSSMBleDevice`** — the **unmodified KinkyMakers firmware** (v1.0.x), which has no serial control path at all: its only command surface is the NimBLE GATT service, driven here over `bleak`. AI and pattern modes only — the stock streaming mode blocks on every direction reversal, so the funscript path stays on the custom firmware and the Funscript tab is closed for this device.
+
+  Two things make it a separate driver rather than a transport option on `OSSMDevice`. First, entering `strokeEngine` runs `resetSettingsStrokeEngine()` on the device, wiping speed/stroke/depth/sensation — so instead of ordering writes around that, the driver holds a *desired* settings dict and re-sends whatever the device has drifted away from, which makes mode changes and reconnects self-healing. Second, the firmware only notifies when its state *fingerprint* changes and position is not part of that fingerprint, so there is no live position to gauge from: the needle is simulated by `devices/stroke_patterns.py` driven from the settings the firmware *reports* (i.e. post speed-knob), and marked `simulated` in the stream. Note that the physical speed knob caps AI speed by default (`USE_SPEED_KNOB_AS_LIMIT`), which the driver leaves in place as a hardware interlock.
 - **`CoyoteBLE`** — direct BLE control of a DG-Lab Coyote 3.0 via `bleak`, implementing the V3 protocol. Channel strengths are clamped to configurable **soft limits**, and BLE name / frequency / limits are taken from settings (and pushed live to a connected device when saved).
 - **`ButtplugDevice`** — speaks the Buttplug v3 wire protocol to **Intiface Central** (default `ws://127.0.0.1:12345`) over the `websockets` dependency the app already has, so no vendor-specific code and no extra package. Intiface does its own scanning; the app pushes the resulting toy list to the Setup tab (`GET /api/device/buttplug/devices`, `POST /api/device/buttplug/select`).
 
@@ -577,6 +580,7 @@ Selected endpoints (see `routes.py` for the full set):
 | `GET`  | `/api/device/state` · `/api/device/stream` | State snapshot / live SSE stream. |
 | `POST` | `/api/device/command` | Send a raw command dict. |
 | `POST` | `/api/device/serial_emulator/start` · `/stop` | Local PTY + emulator. |
+| `GET`  | `/api/ossm_ble/scan` | Scan for stock-firmware OSSM machines over BLE. |
 | `GET` / `POST` | `/api/coyote/scan` · `/api/coyote/command` | Coyote BLE scan / command. |
 | `GET` / `POST` | `/api/device/buttplug/devices` · `/select` | List Intiface toys / choose the active one. |
 
@@ -623,7 +627,8 @@ AIMO/
 ├── heart_rate_sensor.py    # Standalone BLE heart-rate experiment (not wired into the app)
 ├── devices/
 │   ├── base.py             # AbstractDevice + DeviceState
-│   ├── ossm.py             # OSSM (WebSocket / serial)
+│   ├── ossm.py             # OSSM, custom firmware (WebSocket / serial)
+│   ├── ossm_ble.py         # OSSM, stock KinkyMakers firmware (BLE)
 │   ├── coyote_ble.py       # Coyote 3.0 (BLE)
 │   ├── buttplug.py         # Buttplug v3 client → Intiface Central
 │   ├── stroke_patterns.py  # Percent-space port of the OSSM firmware patterns

@@ -63,7 +63,7 @@ PLAIN_SETTING_KEYS = (
     "low_watermark", "high_watermark", "generator_sleep",
     "kokoro_voice", "kokoro_speed", "kokoro_device",
     "rvc_enabled", "rvc_pitch", "rvc_index_rate",
-    "device_ws_url", "coyote_ble_name",
+    "device_ws_url", "ossm_ble_address", "coyote_ble_name",
     "coyote_soft_limit_a", "coyote_soft_limit_b", "coyote_freq_ms",
     "buttplug_ws_url", "buttplug_vibe_floor",
 )
@@ -688,12 +688,23 @@ def register_routes(app: Flask) -> None:
     @app.post("/api/device/connect")
     def api_device_connect():
         body = request.get_json(silent=True) or {}
-        default_url = load_settings().get("device_ws_url", "ws://localhost:8888")
-        url = body.get("url") or default_url
         dev = get_active_device()
         if not dev:
             return jsonify({"ok": False, "error": "No device selected"}), 400
+
+        settings = load_settings()
+        # Each transport remembers its own address, so switching device type
+        # never hands a WebSocket URL to a BLE driver or vice versa.
+        if dev.device_type == "ossm_ble":
+            default_url = settings.get("ossm_ble_address", "")
+        else:
+            default_url = settings.get("device_ws_url", "ws://localhost:8888")
+        url = body.get("url") or default_url
+
         ok = dev.connect(url)
+        if ok and dev.device_type == "ossm_ble" and url:
+            settings["ossm_ble_address"] = url
+            save_settings(settings)
         return jsonify({"ok": ok, "url": url, "state": dev.latest_state})
 
     @app.post("/api/device/disconnect")
@@ -705,7 +716,11 @@ def register_routes(app: Flask) -> None:
 
     @app.post("/api/device/home")
     def api_device_home():
-        """Home the device by sending setZero (OSSM only)."""
+        """Home the device by sending setZero (custom OSSM firmware only).
+
+        Stock firmware has no homing command: it homes itself on the way into a
+        play mode, so this is a no-op there rather than an error.
+        """
         dev = get_active_device()
         if not dev:
             return jsonify({"ok": False, "error": "No device"}), 400
@@ -783,6 +798,18 @@ def register_routes(app: Flask) -> None:
     def api_device_serial_emulator_stop():
         _serial_emulator.stop()
         return jsonify({"ok": True})
+
+    # ── Stock-Firmware OSSM Routes ──────────────────────────────────────────
+
+    @app.get("/api/ossm_ble/scan")
+    def api_ossm_ble_scan():
+        from devices.ossm_ble import OSSMBleDevice
+        try:
+            results = OSSMBleDevice.scan(timeout=6.0)
+            return jsonify({"ok": True, "devices": results})
+        except Exception as exc:
+            log.error("OSSM BLE scan error: %s", exc)
+            return jsonify({"ok": False, "error": str(exc)}), 500
 
     # ── Coyote-Specific Routes ──────────────────────────────────────────────
 

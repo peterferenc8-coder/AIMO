@@ -52,7 +52,8 @@ async function syncManualDeviceType() {
 function updateManualPanels() {
   // "No Toy" borrows the stroke controls: they drive the on-screen gauge and
   // the pattern engine, they just have nothing to move.
-  if (currentManualDevice === 'ossm' || currentManualDevice === 'none') {
+  if (currentManualDevice === 'ossm' || currentManualDevice === 'ossm_ble'
+      || currentManualDevice === 'none') {
     if (manualOssmPanel) manualOssmPanel.style.display = '';
     if (manualCoyotePanel) manualCoyotePanel.style.display = 'none';
   } else {
