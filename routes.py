@@ -16,7 +16,7 @@ import time
 import atexit
 from pathlib import Path
 
-from flask import Flask, Response, abort, jsonify, render_template, request, send_file
+from flask import Flask, Response, abort, jsonify, render_template, request, send_file, url_for
 
 from ai_connector import (
     GoogleAIConnector,
@@ -63,6 +63,7 @@ PLAIN_SETTING_KEYS = (
     "low_watermark", "high_watermark", "generator_sleep",
     "kokoro_voice", "kokoro_speed", "kokoro_device",
     "rvc_enabled", "rvc_pitch", "rvc_index_rate",
+    "avatar_model",
     "device_ws_url", "ossm_ble_address", "coyote_ble_name",
     "coyote_soft_limit_a", "coyote_soft_limit_b", "coyote_freq_ms",
     "buttplug_ws_url", "buttplug_vibe_floor",
@@ -72,13 +73,18 @@ SECRET_SETTING_KEYS = (
 )
 
 from config import (
+    AVATAR_MODEL_EXTS,
+    AVATAR_MODELS_DIR,
+    BUILTIN_MODELS_DIR,
     CUSTOM_PATTERNS_DIR,
+    DEFAULT_AVATAR_MODEL,
     DEVICE_EMULATOR_SCRIPT,
     FUNSCRIPT_DIR,
     VIDEOS_DIR,
 )
 
 CUSTOM_PATTERNS_DIR.mkdir(parents=True, exist_ok=True)
+AVATAR_MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 log = logging.getLogger(__name__)
 
@@ -314,6 +320,77 @@ def _plain_settings_payload(settings: dict) -> dict:
     return {key: settings.get(key) for key in PLAIN_SETTING_KEYS}
 
 
+# ── Avatar models ────────────────────────────────────────────────────────────
+# Ids are "builtin:<name>" or "user:<name>".  The name is always run through
+# os.path.basename before it touches the filesystem, so a crafted id cannot
+# escape its directory.
+
+def _scan_models(directory: Path, source: str) -> list[dict]:
+    """Every model in one directory. `url` is included so the client can
+    hot-swap on selection without having to rebuild the path itself."""
+    if not directory.is_dir():
+        return []
+    return sorted(
+        (
+            {
+                "id": f"{source}:{f.name}",
+                "label": f.name,
+                "source": source,
+                "url": (
+                    url_for("static", filename=f"models/{f.name}") if source == "builtin"
+                    else url_for("api_avatar_model_file", name=f.name)
+                ),
+            }
+            for f in directory.iterdir()
+            if f.is_file() and f.suffix.lower() in AVATAR_MODEL_EXTS
+        ),
+        key=lambda m: m["label"].lower(),
+    )
+
+
+def _list_avatar_models() -> list[dict]:
+    """Every selectable model, bundled first then uploaded."""
+    return _scan_models(BUILTIN_MODELS_DIR, "builtin") + _scan_models(AVATAR_MODELS_DIR, "user")
+
+
+def _split_model_id(model_id: str) -> tuple[str, str] | None:
+    """('builtin'|'user', safe filename), or None if the id is malformed."""
+    source, _, raw_name = str(model_id or "").partition(":")
+    if source not in ("builtin", "user"):
+        return None
+    name = os.path.basename(raw_name)
+    if not name or Path(name).suffix.lower() not in AVATAR_MODEL_EXTS:
+        return None
+    return source, name
+
+
+def _avatar_model_path(model_id: str) -> Path | None:
+    """The file an id points at, or None if it does not resolve to one."""
+    parts = _split_model_id(model_id)
+    if not parts:
+        return None
+    source, name = parts
+    base = BUILTIN_MODELS_DIR if source == "builtin" else AVATAR_MODELS_DIR
+    path = base / name
+    return path if path.is_file() else None
+
+
+def _avatar_model_url(model_id: str) -> str:
+    """Browser URL for an id, falling back to the default when it no longer
+    resolves — an upload the user deleted must not leave a broken panel."""
+    for candidate in (model_id, DEFAULT_AVATAR_MODEL):
+        parts = _split_model_id(candidate)
+        if not parts or not _avatar_model_path(candidate):
+            continue
+        source, name = parts
+        if source == "builtin":
+            return url_for("static", filename=f"models/{name}")
+        return url_for("api_avatar_model_file", name=name)
+    # Nothing resolves (fresh checkout with no bundled model). Let avatar.js
+    # show its "no model" note rather than pointing at a URL that 404s.
+    return ""
+
+
 def _saved_settings_payload(settings: dict) -> dict:
     payload = _plain_settings_payload(settings)
     payload.update({
@@ -387,6 +464,7 @@ def register_routes(app: Flask) -> None:
             selected_model=selected_model,
             settings=settings,
             patterns=patterns,
+            avatar_model_url=_avatar_model_url(settings.get("avatar_model", "")),
         )
 
     # ── Device Type Management ──────────────────────────────────────────────
@@ -443,6 +521,7 @@ def register_routes(app: Flask) -> None:
             "ollama_validation": ollama_validation,
             "stash_validation": _validation_from_settings(settings, "stash_validation"),
             "prompt_names": list_base_prompt_names(),
+            "avatar_model_options": _list_avatar_models(),
         }
         payload.update(_plain_settings_payload(settings))
         return jsonify(payload)
@@ -1122,6 +1201,47 @@ def register_routes(app: Flask) -> None:
         p = VIDEOS_DIR / os.path.basename(name)
         if p.exists():
             return send_file(p)
+        return jsonify({"ok": False, "error": "Not found"}), 404
+
+    # ── Avatar models ──────────────────────────────────────────────────────────
+
+    @app.get("/api/avatar/models")
+    def api_avatar_models():
+        settings = load_settings()
+        return jsonify({
+            "ok": True,
+            "models": _list_avatar_models(),
+            "selected": settings.get("avatar_model", DEFAULT_AVATAR_MODEL),
+        })
+
+    @app.post("/api/avatar/model/upload")
+    def api_avatar_model_upload():
+        upload = request.files.get("file")
+        if not upload:
+            return jsonify({"ok": False, "error": "Missing file"}), 400
+
+        safe_name = os.path.basename(upload.filename or "")
+        if Path(safe_name).suffix.lower() not in AVATAR_MODEL_EXTS:
+            allowed = ", ".join(sorted(AVATAR_MODEL_EXTS))
+            return jsonify({"ok": False, "error": f"Unsupported file type — expected {allowed}"}), 400
+
+        upload.save(AVATAR_MODELS_DIR / safe_name)
+        model_id = f"user:{safe_name}"
+        return jsonify({
+            "ok": True,
+            "id": model_id,
+            "label": safe_name,
+            "url": _avatar_model_url(model_id),
+            "models": _list_avatar_models(),
+        })
+
+    @app.get("/api/avatar/model/<name>")
+    def api_avatar_model_file(name):
+        """Serve an uploaded model. Bundled ones live under static/ and are
+        served by Flask's own static route; these are outside it."""
+        path = AVATAR_MODELS_DIR / os.path.basename(name)
+        if path.is_file():
+            return send_file(path)
         return jsonify({"ok": False, "error": "Not found"}), 404
 
     # ── Stash integration ──────────────────────────────────────────────────────

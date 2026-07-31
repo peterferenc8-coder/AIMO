@@ -647,7 +647,10 @@ input[type="range"] {
   display: inline-flex;
   align-items: center;
 }
-#settings-upload-file {
+/* The native file input is replaced by the styled .settings-upload-label that
+   points at it, so move it offscreen rather than hiding it — display:none
+   would take it out of the focus order too. */
+.settings-actions input[type="file"] {
   position: absolute;
   left: -9999px;
 }

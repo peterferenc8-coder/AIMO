@@ -46,6 +46,7 @@ class Avatar {
     this.visemeIdx = 0;
     this.clock = null;          // () => milliseconds into the utterance, or null
     this.weights = Object.fromEntries(VISEME_NAMES.map((n) => [n, 0]));
+    this._modelUrl = null;      // currently loaded model, so setModel can no-op
     this._raf = null;
   }
 
@@ -73,11 +74,47 @@ class Avatar {
     this.lookTarget = new THREE.Object3D();
     this.scene.add(this.lookTarget);
 
-    this._load(modelUrl);
+    // Mount even with no model configured, so that uploading one from Settings
+    // can preview straight away instead of needing a page reload.
+    if (modelUrl) this._load(modelUrl);
+    else this._showMissingNote();
     this._animate();
   }
 
+  /**
+   * Swap to a different model in place (Settings → Avatar).
+   *
+   * init() early-returns once mounted and _load() only ever adds to the scene,
+   * so the teardown lives here. Disposal is not optional: these models run to
+   * ~20MB of geometry and textures, and without deepDispose every switch
+   * strands another copy on the GPU for the lifetime of the page.
+   */
+  setModel(modelUrl) {
+    if (!modelUrl) return;
+    // Not mounted yet — init() has not run, and will load this URL itself.
+    if (!this.renderer) return;
+    if (this._modelUrl === modelUrl) return;
+
+    this.stopSpeaking();
+    if (this.vrm) {
+      this.scene.remove(this.vrm.scene);
+      VRMUtils.deepDispose(this.vrm.scene);
+    }
+    this.vrm = null;
+    this.ready = false;
+    this.bones = {};
+    this.weights = Object.fromEntries(VISEME_NAMES.map((n) => [n, 0]));
+    this._load(modelUrl);
+  }
+
   _load(modelUrl) {
+    this._modelUrl = modelUrl;
+    // Drop any note left by a previous failed load, or repeated bad picks
+    // stack them up in the panel.
+    for (const stale of this.container.querySelectorAll('.avatar-missing')) {
+      stale.remove();
+    }
+
     const loader = new GLTFLoader();
     loader.register((parser) => new VRMLoaderPlugin(parser));
     loader.load(modelUrl, (gltf) => {
@@ -103,15 +140,21 @@ class Avatar {
       this.ready = true;
       this._frameHead();
     }, undefined, (err) => {
-      // The model is gitignored on licence grounds, so a fresh clone has none.
       // Say so in the panel rather than leaving an unexplained empty box.
       console.error('[avatar] failed to load model', err);
-      const note = document.createElement('p');
-      note.className = 'avatar-missing';
-      note.textContent = 'No avatar model. Add one at static/models/avatar.glb '
-        + '— see static/models/README.md';
-      this.container.appendChild(note);
+      // Forget the URL so re-picking the same entry retries rather than
+      // being swallowed by setModel's no-op guard.
+      this._modelUrl = null;
+      this._showMissingNote();
     });
+  }
+
+  _showMissingNote() {
+    const note = document.createElement('p');
+    note.className = 'avatar-missing';
+    note.textContent = 'No avatar model loaded. Pick or upload one under '
+      + 'Settings → Avatar.';
+    this.container.appendChild(note);
   }
 
   /** Frame the head and shoulders — this is a talking portrait, not a body shot. */
@@ -300,8 +343,10 @@ window.Avatar = new Avatar();
 // both guarded, so load order stops mattering.
 function mountAvatar() {
   const stage = document.getElementById('ai-avatar-stage');
-  if (!stage || !stage.dataset.modelUrl) return;
-  window.Avatar.init(stage, stage.dataset.modelUrl);
+  if (!stage) return;
+  // An empty data-model-url means nothing is configured yet; init() still
+  // mounts so Settings can load one without a reload.
+  window.Avatar.init(stage, stage.dataset.modelUrl || '');
 }
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', mountAvatar);

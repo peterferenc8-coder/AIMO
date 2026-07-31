@@ -244,6 +244,25 @@
       </div>
     </div>
 
+    <!-- ── Avatar ────────────────────────────────────────────────────────── -->
+    <div class="settings-card">
+      <h3>Avatar</h3>
+      <p class="settings-note">The VRM model shown on the AI tab. Changing it previews immediately; press Save All to keep it. Uploaded models are stored with your settings, so they survive updates. For lip-sync a model needs the standard <code>aa/ih/ou/ee/oh</code> mouth shapes — see <code>static/models/README.md</code>.</p>
+
+      <div class="settings-field">
+        <label for="settings-avatar-model">Model</label>
+        <select id="settings-avatar-model" data-setting="avatar_model"></select>
+      </div>
+
+      <div class="settings-actions">
+        <label class="btn btn-secondary settings-upload-label" for="settings-avatar-file">Choose File</label>
+        <input type="file" id="settings-avatar-file" accept=".vrm,.glb" />
+        <button class="btn btn-primary" id="settings-avatar-upload">Upload Model</button>
+      </div>
+
+      <div class="settings-status" id="settings-avatar-status">No model uploaded yet</div>
+    </div>
+
     <!-- ── Stash Server ──────────────────────────────────────────────────── -->
     <div class="settings-card">
       <h3>Stash Server</h3>

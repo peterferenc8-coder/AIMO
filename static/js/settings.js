@@ -12,6 +12,7 @@ const LOCAL_PROVIDER = 'ollama';
 const settingsState = {
   promptNames: [],
   keyPresent: Object.fromEntries(AI_PROVIDERS.map((p) => [p, false])),
+  avatarModels: [],
   dirty: false,
 };
 
@@ -125,14 +126,19 @@ function setValidationState(provider, stateText, isOk) {
   validation.classList.toggle('error', isOk === false);
 }
 
+// Options are either plain strings (model names, prompt files) or
+// {id, label} objects where the stored value and the display text differ —
+// avatar models are ids like "user:foo.vrm" but should read as "foo.vrm".
 function populateSelect(select, options, selectedValue) {
   if (!select) return;
   select.innerHTML = '';
-  for (const optionValue of options) {
+  for (const entry of options) {
+    const value = (entry && typeof entry === 'object') ? entry.id : entry;
+    const label = (entry && typeof entry === 'object') ? entry.label : entry;
     const option = document.createElement('option');
-    option.value = optionValue;
-    option.textContent = optionValue;
-    if (optionValue === selectedValue) option.selected = true;
+    option.value = value;
+    option.textContent = label;
+    if (value === selectedValue) option.selected = true;
     select.appendChild(option);
   }
 }
@@ -282,8 +288,19 @@ async function loadSettings() {
   );
   populateSelect($settings('settings-prompt-name'), settingsState.promptNames, settingsState.promptNames[0] || '');
 
+  settingsState.avatarModels = data.avatar_model_options || [];
+  populateSelect($settings('settings-avatar-model'), settingsState.avatarModels, data.avatar_model || '');
+
   fillSettingFields(data);
   applyStatusPanel(data);
+
+  // A saved id whose file has since been deleted leaves the select blank
+  // (fillSettingFields cannot select a missing option). Fall back to the first
+  // model so the dropdown always shows what the AI tab is actually rendering.
+  const avatarSelect = $settings('settings-avatar-model');
+  if (avatarSelect && !avatarSelect.value && settingsState.avatarModels.length) {
+    avatarSelect.value = settingsState.avatarModels[0].id;
+  }
 
   $settings('settings-prompt-count').textContent = `${settingsState.promptNames.length} files`;
 
@@ -428,6 +445,59 @@ async function revertPromptOverrides() {
   setSettingsMessage(`Reverted ${data.removed} override file(s).`);
 }
 
+// ── Avatar model ─────────────────────────────────────────────────────────────
+
+function avatarModelUrl(modelId) {
+  const match = settingsState.avatarModels.find((m) => m.id === modelId);
+  return match ? match.url : '';
+}
+
+/** Swap the live avatar to the currently selected model, if it is mounted. */
+function previewSelectedAvatar() {
+  const select = $settings('settings-avatar-model');
+  if (!select || !select.value) return;
+  const url = avatarModelUrl(select.value);
+  if (url && window.Avatar) window.Avatar.setModel(url);
+}
+
+function setAvatarMessage(message, isError = false) {
+  const status = $settings('settings-avatar-status');
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle('error', Boolean(isError));
+}
+
+async function uploadAvatarModel() {
+  const fileInput = $settings('settings-avatar-file');
+  if (!fileInput || !fileInput.files.length) {
+    setAvatarMessage('Choose a .vrm or .glb file to upload.', true);
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+
+  setAvatarMessage('Uploading…');
+  const response = await fetch('/api/avatar/model/upload', {
+    method: 'POST',
+    body: formData,
+  });
+  const data = await response.json();
+
+  if (!response.ok || !data.ok) {
+    setAvatarMessage(data.error || 'Upload failed', true);
+    return;
+  }
+
+  // Rebuild the list so the new file is selectable, then select and preview it.
+  settingsState.avatarModels = data.models || [];
+  populateSelect($settings('settings-avatar-model'), settingsState.avatarModels, data.id);
+  fileInput.value = '';
+  previewSelectedAvatar();
+  setDirty(true);
+  setAvatarMessage(`Uploaded ${data.label} — press Save All to keep it.`);
+}
+
 // ── Wiring ────────────────────────────────────────────────────────────────────
 
 function wireSettingsEvents() {
@@ -464,6 +534,14 @@ function wireSettingsEvents() {
       setSettingsMessage(`Selected ${promptSelect.value}.`);
     });
   }
+
+  const avatarUpload = $settings('settings-avatar-upload');
+  if (avatarUpload) avatarUpload.addEventListener('click', uploadAvatarModel);
+
+  // Preview on selection. The generic [data-setting] handler above already
+  // marks the form dirty, so this only has to do the swap.
+  const avatarSelect = $settings('settings-avatar-model');
+  if (avatarSelect) avatarSelect.addEventListener('change', previewSelectedAvatar);
 }
 
 injectHelpIcons();

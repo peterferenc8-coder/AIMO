@@ -4,18 +4,26 @@ __pycache__/
 *.bin
 logs/
 
-# Avatar models. Kept out of the repo on licence grounds, not size: VRoid Hub
+# Avatar models. Ignored by default on licence grounds, not size: VRoid Hub
 # models are commonly published with redistribution disallowed, and this repo
 # is public. See static/models/README.md.
-static/models/*.glb
-static/models/*.vrm
+#
+# public.vrm is the exception -- it is published with redistribution=allow, so
+# it ships in the repo and inside release binaries as the bundled default.
+# Anything else here stays local; users add their own via Settings -> Avatar,
+# which stores uploads outside the repo entirely (DATA_DIR/models).
+static/models/*
+!static/models/README.md
+!static/models/public.vrm
+
+# Uploaded avatar models. Running from source, DATA_DIR is the repo itself, so
+# Settings -> Avatar writes here. Root-anchored so static/models/ is unaffected.
+/models/
 
 # PyInstaller build artifacts
 build/
 dist/
 out/
-
-static/models/*
 
 # RVC voice-conversion workspace: the Applio checkout, its venv, trained
 # weights, and the ElevenLabs-generated training audio. Large, and the
