@@ -79,6 +79,17 @@ FUNSCRIPT_DIR       = DATA_DIR / "patterns" / "funscripts"
 VIDEOS_DIR          = DATA_DIR / "patterns" / "videos"
 LOGS_DIR            = DATA_DIR / "logs"
 
+# ── Avatar models ────────────────────────────────────────────────────────────
+# Two sources, addressed by prefixed id so the same filename can exist in both:
+#   builtin:<name>  shipped in the bundle, read-only
+#   user:<name>     uploaded via Settings, lives in DATA_DIR
+# Uploads MUST land in DATA_DIR: in a frozen build RESOURCE_DIR is a PyInstaller
+# temp dir that is wiped every run, so a model written there would not survive.
+BUILTIN_MODELS_DIR = STATIC_DIR / "models"
+AVATAR_MODELS_DIR  = DATA_DIR / "models"
+DEFAULT_AVATAR_MODEL = "builtin:public.vrm"
+AVATAR_MODEL_EXTS = {".vrm", ".glb"}
+
 # ── Buffer & timing ──────────────────────────────────────────────────────────
 DISPLAY_INTERVAL = 10.0   # seconds between displayed turns
 LOW_WATERMARK = 3         # request more when buffer <= 3

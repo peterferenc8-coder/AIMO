@@ -52,6 +52,7 @@ from config import (
     COYOTE_SOFT_LIMIT_A,
     COYOTE_SOFT_LIMIT_B,
     COYOTE_DEFAULT_FREQ_MS,
+    DEFAULT_AVATAR_MODEL,
 )
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -103,6 +104,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "rvc_enabled": RVC_ENABLED,
     "rvc_pitch": RVC_PITCH,
     "rvc_index_rate": RVC_INDEX_RATE,
+    # ── Avatar ─────────────────────────────────────────────────────────────
+    # A prefixed id ("builtin:x.vrm" / "user:x.vrm"), not a path — see config.
+    "avatar_model": DEFAULT_AVATAR_MODEL,
     # ── Device / hardware ──────────────────────────────────────────────────
     "device_ws_url": DEFAULT_DEVICE_WS_URL,
     # Stock-firmware OSSM is BLE-only, so it remembers a MAC rather than a URL.
@@ -241,6 +245,11 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
     settings["rvc_enabled"] = bool(settings.get("rvc_enabled", d["rvc_enabled"]))
     settings["rvc_pitch"] = _as_int(settings.get("rvc_pitch"), d["rvc_pitch"], -6, 6)
     settings["rvc_index_rate"] = _as_float(settings.get("rvc_index_rate"), d["rvc_index_rate"], 0.0, 1.0)
+
+    # Avatar.  Only tidied here — whether the id still resolves to a file on
+    # disk is checked at render time, so a deleted upload falls back rather
+    # than being silently rewritten behind the user's back.
+    settings["avatar_model"] = _as_clean_text(settings.get("avatar_model")) or d["avatar_model"]
 
     # Device / hardware
     settings["device_ws_url"] = _as_clean_text(settings.get("device_ws_url")) or d["device_ws_url"]

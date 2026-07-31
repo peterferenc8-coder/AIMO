@@ -79,8 +79,9 @@
   {# Avatar and video are grid siblings of the stream, not children of it, so
      each can own its own columns. The video takes over both while it plays. #}
   <div id="ai-avatar-panel">
-    <div id="ai-avatar-stage"
-         data-model-url="{{ url_for('static', filename='models/avatar.glb') }}"></div>
+    {# Resolved server-side from the avatar_model setting, so the chosen model
+       is already right on first paint. Settings can swap it live afterwards. #}
+    <div id="ai-avatar-stage" data-model-url="{{ avatar_model_url }}"></div>
   </div>
 
   <div id="ai-video-panel">
