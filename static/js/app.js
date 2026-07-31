@@ -101,8 +101,23 @@ function updateAllGauges(data) {
 // for anything that never homes.
 const DEVICE_TABS = ['manual', 'ai', 'custom', 'funscript'];
 
+// Tabs the *current* device cannot drive at all, so unlocking them would only
+// offer controls that silently do nothing. Set per device type by setup.js.
+let unsupportedTabs = [];
+
+function setUnsupportedTabs(tabs) {
+  unsupportedTabs = tabs || [];
+  unsupportedTabs.forEach(tab => {
+    const btn = $(`tab-btn-${tab}`);
+    if (!btn) return;
+    btn.disabled = true;
+    if (btn.classList.contains('active')) $('tab-btn-setup').click();
+  });
+}
+
 function unlockDeviceTabs() {
   DEVICE_TABS.forEach(tab => {
+    if (unsupportedTabs.includes(tab)) return;
     const btn = $(`tab-btn-${tab}`);
     if (btn && btn.disabled) btn.disabled = false;
   });
@@ -134,6 +149,12 @@ function openDeviceStream() {
       // added or removed, so the setup list stays live without polling.
       if (data.devices) {
         window.dispatchEvent(new CustomEvent('buttplug-devices', { detail: data.devices }));
+      }
+      // Stock-firmware OSSM reports its own state machine name. It is the only
+      // way to see a homing pass or a preflight gate from the browser, so the
+      // setup panel shows it verbatim.
+      if (data.fw_state !== undefined) {
+        window.dispatchEvent(new CustomEvent('device-fw-state', { detail: data.fw_state }));
       }
     } catch (e) {
       console.error('SSE parse error:', e, ev.data);
@@ -175,4 +196,4 @@ const errorBannerClose = $('error-banner-close');
 if (errorBannerClose) errorBannerClose.addEventListener('click', hideError);
 
 // ── Expose globals ─────────────────────────────────────────────────────────
-window.App = { showError, showInfo, hideError, setDeviceStatus, openDeviceStream, closeDeviceStream, sendDeviceCmd, unlockDeviceTabs, lockDeviceTabs };
+window.App = { showError, showInfo, hideError, setDeviceStatus, openDeviceStream, closeDeviceStream, sendDeviceCmd, unlockDeviceTabs, lockDeviceTabs, setUnsupportedTabs };

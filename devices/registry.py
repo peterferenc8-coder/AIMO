@@ -9,6 +9,7 @@ from typing import Dict, Optional, Type
 
 from .base import AbstractDevice
 from .ossm import OSSMDevice
+from .ossm_ble import OSSMBleDevice
 from .coyote_ble import CoyoteBLE
 from .buttplug import ButtplugDevice
 from .none_device import NoneDevice
@@ -18,6 +19,7 @@ log = logging.getLogger(__name__)
 _REGISTRY: Dict[str, Type[AbstractDevice]] = {
     "none": NoneDevice,
     "ossm": OSSMDevice,
+    "ossm_ble": OSSMBleDevice,
     "coyote": CoyoteBLE,
     "buttplug": ButtplugDevice,
 }
@@ -30,6 +32,7 @@ def list_device_types() -> list[dict]:
     return [
         {"id": "none", "name": "No Toy (software only)"},
         {"id": "ossm", "name": "OSSM (Linear Actuator)"},
+        {"id": "ossm_ble", "name": "OSSM - stock firmware (BLE)"},
         {"id": "coyote", "name": "DG-Lab Coyote 3.0 (E-Stim BLE)"},
         {"id": "buttplug", "name": "Buttplug / Intiface"},
     ]

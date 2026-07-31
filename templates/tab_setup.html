@@ -7,6 +7,7 @@
       <select id="device-type-select">
         <option value="none">No Toy (software only)</option>
         <option value="ossm">OSSM (Linear Actuator)</option>
+        <option value="ossm_ble">OSSM - stock firmware (BLE)</option>
         <option value="coyote">DG-Lab Coyote 3.0 (E-Stim BLE)</option>
         <option value="buttplug">Buttplug / Intiface</option>
       </select>
@@ -78,6 +79,42 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Stock-firmware OSSM (BLE) Connection -->
+    <div id="setup-ossm-ble-panel" class="device-panel" style="display:none;">
+      <div class="connection-bar">
+        <label for="ossm-ble-address">BLE Address</label>
+        <input type="text" id="ossm-ble-address" placeholder="XX:XX:XX:XX:XX:XX" />
+        <button class="btn" id="ossm-ble-scan">Scan</button>
+        <button class="btn" id="ossm-ble-connect">Connect</button>
+        <span id="ossm-ble-conn-status" class="conn-status">Offline</span>
+        <span id="ossm-ble-dot" class="dot"></span>
+      </div>
+
+      <div class="connection-bar">
+        <label>Scan Results</label>
+        <select id="ossm-ble-scan-results" disabled>
+          <option value="">No devices found</option>
+        </select>
+      </div>
+
+      <div class="connection-bar">
+        <label>Machine State</label>
+        <span id="ossm-ble-fw-state" class="conn-status">--</span>
+      </div>
+
+      <div class="device-info">
+        <p>For unmodified KinkyMakers firmware (v1.0.x). AI and pattern modes
+           only — the Funscript tab needs the custom firmware over USB or
+           WebSocket.</p>
+        <p>The machine homes itself when a session starts. If it stops on the
+           preflight screen, turn the speed knob to zero and press the encoder.</p>
+        <p>The physical speed knob caps AI speed, so it has to be turned up for
+           the machine to move.</p>
+        <p>The position gauge is simulated from the pattern the firmware
+           reports; the stock firmware does not stream its real position.</p>
       </div>
     </div>
 

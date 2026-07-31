@@ -38,6 +38,7 @@ const deviceTypeSetBtn = document.getElementById('device-type-set');
 const deviceTypeStatus = document.getElementById('device-type-status');
 const nonePanel = document.getElementById('setup-none-panel');
 const ossmPanel = document.getElementById('setup-ossm-panel');
+const ossmBlePanel = document.getElementById('setup-ossm-ble-panel');
 const coyotePanel = document.getElementById('setup-coyote-panel');
 const buttplugPanel = document.getElementById('setup-buttplug-panel');
 const setupPanelTitle = document.getElementById('setup-panel-title');
@@ -45,6 +46,7 @@ const setupPanelTitle = document.getElementById('setup-panel-title');
 const DEVICE_PANELS = {
   none: { panel: nonePanel, title: 'Position' },
   ossm: { panel: ossmPanel, title: 'Position' },
+  ossm_ble: { panel: ossmBlePanel, title: 'Position (simulated)' },
   coyote: { panel: coyotePanel, title: 'Coyote Status' },
   buttplug: { panel: buttplugPanel, title: 'Position' },
 };
@@ -64,7 +66,15 @@ async function loadDeviceType() {
   }
 }
 
+// Stock OSSM firmware has no usable funscript path — its streaming mode stalls
+// on every direction reversal — so the driver drops stream commands and the tab
+// stays shut rather than offering controls that do nothing.
+const UNSUPPORTED_TABS = {
+  ossm_ble: ['funscript'],
+};
+
 function updateDevicePanels() {
+  window.App.setUnsupportedTabs(UNSUPPORTED_TABS[currentDeviceType] || []);
   const active = DEVICE_PANELS[currentDeviceType] || DEVICE_PANELS.none;
   Object.values(DEVICE_PANELS).forEach(({ panel }) => {
     if (panel) panel.style.display = 'none';
@@ -214,6 +224,104 @@ wireConnectToggle({
   label: 'Device',
   statusEl: document.getElementById('device-conn-status'),
   getUrl: () => document.getElementById('device-url').value.trim() || null,
+});
+
+// ── Stock-firmware OSSM (BLE) ───────────────────────────────────────────────
+
+const ossmBleScanBtn = document.getElementById('ossm-ble-scan');
+const ossmBleConnectBtn = document.getElementById('ossm-ble-connect');
+const ossmBleAddressInput = document.getElementById('ossm-ble-address');
+const ossmBleScanResults = document.getElementById('ossm-ble-scan-results');
+const ossmBleConnStatus = document.getElementById('ossm-ble-conn-status');
+const ossmBleDot = document.getElementById('ossm-ble-dot');
+const ossmBleFwState = document.getElementById('ossm-ble-fw-state');
+
+// The address is remembered across restarts, so a returning user only has to
+// press Connect.
+async function loadOssmBleAddress() {
+  if (!ossmBleAddressInput || ossmBleAddressInput.value.trim()) return;
+  try {
+    const res = await fetch('/api/settings');
+    const data = await res.json();
+    if (data.ok && data.ossm_ble_address) {
+      ossmBleAddressInput.value = data.ossm_ble_address;
+    }
+  } catch (err) {
+    console.warn('Failed to load OSSM BLE address', err);
+  }
+}
+loadOssmBleAddress();
+
+if (ossmBleScanBtn) {
+  ossmBleScanBtn.addEventListener('click', async () => {
+    ossmBleScanBtn.disabled = true;
+    ossmBleScanResults.disabled = true;
+    ossmBleScanResults.innerHTML = '<option>Scanning...</option>';
+
+    try {
+      const res = await fetch('/api/ossm_ble/scan');
+      const data = await res.json();
+      ossmBleScanResults.innerHTML = '';
+
+      if (data.ok && data.devices && data.devices.length > 0) {
+        data.devices.forEach((dev) => {
+          const opt = document.createElement('option');
+          opt.value = dev.address;
+          opt.textContent = `${dev.name || 'OSSM'} (${dev.address})`;
+          ossmBleScanResults.appendChild(opt);
+        });
+        ossmBleScanResults.disabled = false;
+        ossmBleAddressInput.value = data.devices[0].address;
+      } else {
+        const opt = document.createElement('option');
+        opt.textContent = data.ok ? 'No OSSM found' : (data.error || 'Scan failed');
+        ossmBleScanResults.appendChild(opt);
+      }
+    } catch (err) {
+      window.App.showError('OSSM BLE scan failed: ' + err.message);
+    } finally {
+      ossmBleScanBtn.disabled = false;
+    }
+  });
+}
+
+if (ossmBleScanResults) {
+  ossmBleScanResults.addEventListener('change', () => {
+    if (ossmBleScanResults.value) {
+      ossmBleAddressInput.value = ossmBleScanResults.value;
+    }
+  });
+}
+
+wireConnectToggle({
+  btn: ossmBleConnectBtn,
+  label: 'OSSM',
+  statusEl: ossmBleConnStatus,
+  dotEl: ossmBleDot,
+  getUrl: () => {
+    const address = ossmBleAddressInput.value.trim();
+    if (!address) {
+      window.App.showError('Please enter a BLE address or scan first');
+      return null;
+    }
+    return address;
+  },
+  onConnect: () => {
+    window.App.setDeviceStatus(true);
+    // The stock firmware homes on the way into a play mode rather than on
+    // connect, so waiting for a homed event here would hang the wizard.
+    window.App.unlockDeviceTabs();
+  },
+  onDisconnect: () => {
+    if (ossmBleFwState) ossmBleFwState.textContent = '--';
+  },
+});
+
+// Surface the firmware's own state name — it is the only way to see a
+// preflight gate or a homing pass from the browser.
+window.addEventListener('device-fw-state', (event) => {
+  if (!ossmBleFwState || currentDeviceType !== 'ossm_ble') return;
+  ossmBleFwState.textContent = event.detail || '--';
 });
 
 // ── Coyote BLE ──────────────────────────────────────────────────────────────
