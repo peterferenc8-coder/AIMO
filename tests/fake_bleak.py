@@ -37,6 +37,12 @@ class FakeBleakClient:
     # Set by a test to make __aenter__ raise, exercising the reconnect loop.
     connect_error: Optional[Exception] = None
 
+    # By default a read echoes back whatever was last written, as the real
+    # config characteristics do. Set this to stand in for firmware that
+    # predates a characteristic and ignores the write. Class-level so a test
+    # can arrange it before connect(), which is otherwise a race.
+    knob_readback_override: Optional[bytes] = None
+
     def __init__(self, address: str, *args: Any, **kwargs: Any):
         self.address = address
         self.is_connected = False
@@ -54,6 +60,7 @@ class FakeBleakClient:
         with cls._instances_lock:
             cls._instances.clear()
         cls.connect_error = None
+        cls.knob_readback_override = None
 
     @classmethod
     def latest(cls, timeout: float = 5.0) -> "FakeBleakClient":
@@ -105,6 +112,12 @@ class FakeBleakClient:
             self.writes.append((str(char).lower(), bytes(data)))
 
     async def read_gatt_char(self, char: Any) -> bytearray:
+        from devices.ossm_ble import SPEED_KNOB_CHAR
+        if str(char).lower() == SPEED_KNOB_CHAR.lower():
+            if FakeBleakClient.knob_readback_override is not None:
+                return bytearray(FakeBleakClient.knob_readback_override)
+            written = self.writes_to(SPEED_KNOB_CHAR)
+            return bytearray(written[-1].encode("utf-8") if written else b"")
         return bytearray()
 
     # ── Test-facing helpers ───────────────────────────────────────────────────
