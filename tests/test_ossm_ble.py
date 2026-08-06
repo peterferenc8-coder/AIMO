@@ -232,6 +232,52 @@ def test_stop_leaves_the_engine_exactly_once(device):
     assert plan(device) == []
 
 
+def test_speed_is_reasserted_when_the_device_reports_a_different_one(device):
+    # With the knob limit off, a reported speed we did not ask for means the
+    # firmware took authority back — on a controller-less machine a floating
+    # ADC pin can do that by itself. Without a resend the session would sit at
+    # whatever the pin reads, because _applied still says speed is live.
+    device.apply_ai_commands({"pattern": "simple_stroke", "speed": 60})
+    device.ingest_state({"state": "strokeEngine.idle", "sessionId": "s1"})
+    assert "set:speed:60" in plan(device)
+    assert plan(device) == []
+
+    device.ingest_state({"state": "strokeEngine.idle", "sessionId": "s1",
+                         "speed": 3, "depth": 50, "stroke": 50,
+                         "sensation": 50, "pattern": 0})
+    assert plan(device) == ["set:speed:60"]
+
+
+def test_speed_reassertion_is_rate_limited(device):
+    device.apply_ai_commands({"pattern": "simple_stroke", "speed": 60})
+    device.ingest_state({"state": "strokeEngine.idle", "sessionId": "s1"})
+    plan(device)
+
+    diverged = {"state": "strokeEngine.idle", "sessionId": "s1", "speed": 3,
+                "depth": 50, "stroke": 50, "sensation": 50, "pattern": 0}
+    device.ingest_state(diverged)
+    assert plan(device) == ["set:speed:60"]
+
+    # A burst of notifications must not become a burst of writes.
+    device.ingest_state(diverged)
+    assert plan(device) == []
+
+
+def test_speed_is_not_reasserted_while_stopped(device):
+    # Coasting down to zero after a stop is the device agreeing with us, not
+    # divergence to correct.
+    device.apply_ai_commands({"pattern": "simple_stroke", "speed": 60})
+    device.ingest_state({"state": "strokeEngine.idle", "sessionId": "s1"})
+    plan(device)
+    device.apply_ai_commands({"pattern": "stop"})
+    plan(device)
+
+    device.ingest_state({"state": "strokeEngine.idle", "sessionId": "s1",
+                         "speed": 42, "depth": 50, "stroke": 50,
+                         "sensation": 50, "pattern": 0})
+    assert plan(device) == []
+
+
 def test_reported_settings_do_not_count_as_applied(device):
     # The device echoes its own settings back. Those must not be mistaken for
     # confirmation of ours, or a knob-limited speed would never be re-sent.
@@ -371,25 +417,32 @@ def test_position_updates_reach_listeners(device):
 
 # ── Transport ─────────────────────────────────────────────────────────────────
 
-def test_connect_subscribes_to_state_and_sets_the_knob_policy(monkeypatch):
+def test_connect_takes_the_speed_knob_out_of_the_calculation(monkeypatch):
+    # With no controller attached the knob pin reads ~0, and the firmware
+    # default would multiply every commanded speed by it and never move.
     install(monkeypatch)
-    device = OSSMBleDevice(speed_knob_as_limit=True)
+    device = OSSMBleDevice()
     try:
         assert device.connect(ADDRESS) is True
         client = FakeBleakClient.latest()
         assert wait_for(lambda: bool(client.notify_callbacks))
-        assert wait_for(lambda: client.writes_to(SPEED_KNOB_CHAR) == ["true"])
+        assert wait_for(lambda: client.writes_to(SPEED_KNOB_CHAR) == ["false"])
+        assert wait_for(
+            lambda: device._state.extra.get("speed_knob_limit_disabled") is True)
     finally:
         device.disconnect()
 
 
-def test_knob_policy_can_be_handed_to_the_host(monkeypatch):
+def test_unconfirmed_knob_limit_is_reported_not_assumed(monkeypatch):
+    # Firmware predating the config characteristic would leave the limit on,
+    # which looks identical to a healthy session until nothing moves.
     install(monkeypatch)
-    device = OSSMBleDevice(speed_knob_as_limit=False)
+    FakeBleakClient.knob_readback_override = b"true"
+    device = OSSMBleDevice()
     try:
         assert device.connect(ADDRESS) is True
-        client = FakeBleakClient.latest()
-        assert wait_for(lambda: client.writes_to(SPEED_KNOB_CHAR) == ["false"])
+        assert wait_for(
+            lambda: device._state.extra.get("speed_knob_limit_disabled") is False)
     finally:
         device.disconnect()
 

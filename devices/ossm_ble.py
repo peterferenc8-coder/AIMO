@@ -30,8 +30,19 @@ The firmware notifies only when its state *fingerprint* changes, and position
 is not part of that fingerprint — so there is no live position feed to drive a
 gauge from. Instead the same seven patterns the firmware runs are reproduced
 host-side by devices/stroke_patterns.py, driven from the settings the firmware
-*reports* (i.e. post speed-knob), and the needle follows that. It mirrors what
-the machine has been told to do; it is not a measurement of where it is.
+*reports*, and the needle follows that. It mirrors what the machine has been
+told to do; it is not a measurement of where it is.
+
+No controller assumed
+---------------------
+This driver targets machines with no physical remote attached, so it disables
+USE_SPEED_KNOB_AS_LIMIT on connect and takes full authority over speed. On a
+controller-less machine the knob pin reads at or near zero, and the firmware
+default would otherwise multiply every commanded speed by it and never move.
+
+The corollary is that there is no hardware speed cap and no physical stop: the
+encoder long-press that returns the machine to the menu lives on the same
+missing controller, so the app's emergency stop is the only one left.
 """
 
 import asyncio
@@ -73,6 +84,10 @@ WRITER_INTERVAL = 0.05
 # per FreeRTOS tick, so writes are spaced rather than blasted.
 WRITE_GAP = 0.01
 MODE_REQUEST_INTERVAL = 1.5
+# How often, at most, to re-assert speed when the device reports a value we did
+# not ask for. Loose enough that the lag between a write and the device's own
+# settings loop picking it up does not count as divergence.
+SPEED_REASSERT_INTERVAL = 2.0
 
 TICK_HZ = 20.0
 TICK_INTERVAL = 1.0 / TICK_HZ
@@ -154,7 +169,7 @@ class OSSMBleDevice(AbstractDevice):
     name = "OSSM (stock firmware, BLE)"
     device_type = "ossm_ble"
 
-    def __init__(self, speed_knob_as_limit: bool = True):
+    def __init__(self):
         super().__init__()
         self._address: Optional[str] = None
         self._client: Optional[Any] = None
@@ -163,11 +178,6 @@ class OSSMBleDevice(AbstractDevice):
         self._stop_event = threading.Event()
         self._lock = threading.RLock()
 
-        # True keeps the physical speed knob as a hard cap on BLE speed, which
-        # is the firmware default and a genuine safety interlock. False hands
-        # AIMO full authority over speed.
-        self._speed_knob_as_limit = speed_knob_as_limit
-
         # Desired vs applied: the whole reconciliation story.
         self._desired: Dict[str, int] = dict(STROKE_ENGINE_DEFAULTS)
         self._desired["pattern"] = 0
@@ -175,6 +185,7 @@ class OSSMBleDevice(AbstractDevice):
         self._want_running = False
         self._exit_requested = False
         self._last_mode_request = float("-inf")
+        self._last_speed_reassert = float("-inf")
         self._outbox: deque = deque()
 
         # AI sends depth and base; the firmware wants depth and stroke.
@@ -296,7 +307,7 @@ class OSSMBleDevice(AbstractDevice):
                     delay = RECONNECT_DELAY_INITIAL
 
                     await client.start_notify(STATE_CHAR, self._on_state_notify)
-                    await self._push_speed_knob_config(client)
+                    await self._disable_speed_knob_limit(client)
 
                     writer = asyncio.create_task(self._writer_loop(client))
                     ticker = asyncio.create_task(self._tick_loop())
@@ -335,14 +346,40 @@ class OSSMBleDevice(AbstractDevice):
             self._exit_requested = False
             self._last_mode_request = float("-inf")
 
-    async def _push_speed_knob_config(self, client) -> None:
-        value = b"true" if self._speed_knob_as_limit else b"false"
+    async def _disable_speed_knob_limit(self, client) -> None:
+        """Take the physical speed knob out of the speed calculation.
+
+        The firmware defaults USE_SPEED_KNOB_AS_LIMIT to true, which computes
+        speed as `knob * bleSpeed / 100`. On a machine with no controller
+        attached the knob pin reads at or near zero, so that multiplication
+        pins speed to zero and nothing moves however fast the AI asks for. With
+        it false, `set:speed:` is taken as an absolute.
+
+        This is load-bearing rather than an optimisation, so a failure is
+        reported instead of shrugged off — and read back, because the whole
+        session is silently dead if it did not land.
+        """
         try:
-            await client.write_gatt_char(SPEED_KNOB_CHAR, value, response=False)
+            await client.write_gatt_char(SPEED_KNOB_CHAR, b"false", response=True)
         except Exception as exc:
-            # Older builds may not expose it; the default (knob as limit) is the
-            # safe one, so this is not worth failing the connection over.
-            log.debug("OSSM BLE speed-knob config write skipped: %s", exc)
+            log.error("OSSM BLE could not disable the speed-knob limit (%s); "
+                      "the machine will not move without a controller", exc)
+            self._update_state(speed_knob_limit_disabled=False)
+            return
+
+        confirmed = False
+        try:
+            readback = bytes(await client.read_gatt_char(SPEED_KNOB_CHAR))
+            confirmed = readback.strip().lower() == b"false"
+            if not confirmed:
+                log.error("OSSM BLE speed-knob limit still reads %r; firmware "
+                          "may predate the config characteristic", readback)
+        except Exception as exc:
+            # Not fatal on its own: the write may well have taken.
+            log.warning("OSSM BLE could not read back the speed-knob "
+                        "config: %s", exc)
+
+        self._update_state(speed_knob_limit_disabled=confirmed)
 
     # ── Writer ────────────────────────────────────────────────────────────────
 
@@ -456,6 +493,25 @@ class OSSMBleDevice(AbstractDevice):
             self._session_id = session
             if not in_engine:
                 self._exit_requested = False
+
+            # With the knob limit off, reported speed should match what we
+            # asked for. When it does not, the firmware has taken speed
+            # authority back: moving the knob past a deadband clears
+            # lastSpeedCommandWasFromBLE, and with no controller attached a
+            # floating ADC pin can trip that on its own. Re-assert instead of
+            # trusting _applied, which would otherwise never resend and leave
+            # the session stuck at whatever the pin happens to read.
+            now = time.monotonic()
+            if (in_engine and self._want_running
+                    # Only once we believe it landed. Before that the ordinary
+                    # reconciler is about to send it anyway, and counting that
+                    # as divergence would spend the rate-limit window on a
+                    # difference we already knew about.
+                    and self._applied.get("speed") == self._desired["speed"]
+                    and speed != self._desired["speed"]
+                    and now - self._last_speed_reassert >= SPEED_REASSERT_INTERVAL):
+                self._last_speed_reassert = now
+                self._applied.pop("speed", None)
 
             self._sync_simulation(speed, depth, stroke, sensation,
                                   pattern_index, in_engine)
