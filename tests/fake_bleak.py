@@ -42,6 +42,9 @@ class FakeBleakClient:
     # predates a characteristic and ignores the write. Class-level so a test
     # can arrange it before connect(), which is otherwise a race.
     knob_readback_override: Optional[bytes] = None
+    # Default valid firmware state for the driver's initial read. Tests may
+    # override this with raw bytes to exercise retry/fallback behaviour.
+    state_readback_override: Optional[bytes] = None
 
     def __init__(self, address: str, *args: Any, **kwargs: Any):
         self.address = address
@@ -49,6 +52,7 @@ class FakeBleakClient:
         self.writes: List[Tuple[str, bytes]] = []
         self.notify_callbacks: Dict[str, Callable[[Any, bytearray], None]] = {}
         self.write_error: Optional[Exception] = None
+        self.command_readback: bytes = b""
         self._lock = threading.Lock()
         with FakeBleakClient._instances_lock:
             FakeBleakClient._instances.append(self)
@@ -61,6 +65,7 @@ class FakeBleakClient:
             cls._instances.clear()
         cls.connect_error = None
         cls.knob_readback_override = None
+        cls.state_readback_override = None
 
     @classmethod
     def latest(cls, timeout: float = 5.0) -> "FakeBleakClient":
@@ -108,16 +113,45 @@ class FakeBleakClient:
                               response: bool = False) -> None:
         if self.write_error is not None:
             raise self.write_error
+        payload = bytes(data)
+        target = str(char).lower()
         with self._lock:
-            self.writes.append((str(char).lower(), bytes(data)))
+            self.writes.append((target, payload))
+            try:
+                from devices.ossm_ble import COMMAND_CHAR
+                if target == COMMAND_CHAR.lower():
+                    self.command_readback = payload
+            except Exception:
+                pass
 
     async def read_gatt_char(self, char: Any) -> bytearray:
-        from devices.ossm_ble import SPEED_KNOB_CHAR
-        if str(char).lower() == SPEED_KNOB_CHAR.lower():
+        from devices.ossm_ble import COMMAND_CHAR, SPEED_KNOB_CHAR, STATE_CHAR
+        target = str(char).lower()
+        if target == SPEED_KNOB_CHAR.lower():
             if FakeBleakClient.knob_readback_override is not None:
                 return bytearray(FakeBleakClient.knob_readback_override)
             written = self.writes_to(SPEED_KNOB_CHAR)
             return bytearray(written[-1].encode("utf-8") if written else b"")
+        if target == COMMAND_CHAR.lower():
+            # Stock firmware keeps the last command echo/ack readable even after
+            # the test clears its write history for a new assertion window.
+            return bytearray(self.command_readback)
+        if target == STATE_CHAR.lower():
+            if FakeBleakClient.state_readback_override is not None:
+                return bytearray(FakeBleakClient.state_readback_override)
+            payload = {
+                "timestamp": 1,
+                "state": "menu.idle",
+                "speed": 0,
+                "stroke": 50,
+                "sensation": 50,
+                "depth": 10,
+                "buffer": 100,
+                "pattern": 0,
+                "position": 0.0,
+                "sessionId": "initial-session",
+            }
+            return bytearray(json.dumps(payload).encode("utf-8"))
         return bytearray()
 
     # ── Test-facing helpers ───────────────────────────────────────────────────

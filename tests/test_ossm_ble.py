@@ -218,18 +218,24 @@ def test_new_session_id_reapplies_everything(device):
     ]
 
 
-def test_stop_leaves_the_engine_exactly_once(device):
+def test_ai_stop_holds_zero_without_leaving_stroke_engine(device):
     device.apply_ai_commands({"pattern": "simple_stroke", "speed": 40})
     device._fw_state = "strokeEngine.idle"
     plan(device)
 
     device.apply_ai_commands({"pattern": "stop"})
-    assert plan(device) == ["set:speed:0", "go:menu"]
-    # The device has not reported the new state yet; do not pile on.
+    assert device._motion_paused is True
+    assert device._want_running is True
+    assert device._desired["speed"] == 40
+    assert [cmd for _, cmd in device._drain_plan()] == ["set:speed:0"]
     assert plan(device) == []
 
-    device.ingest_state({"state": "menu.idle", "sessionId": "s1"})
-    assert plan(device) == []
+    # A normal AI pattern releases the hold and reapplies settings speed-last.
+    device.apply_ai_commands({"pattern": "simple_stroke", "speed": 45})
+    assert device._motion_paused is False
+    resumed = plan(device)
+    assert "go:menu" not in resumed
+    assert resumed[-1] == "set:speed:45"
 
 
 def test_speed_is_reasserted_when_the_device_reports_a_different_one(device):
@@ -263,9 +269,9 @@ def test_speed_reassertion_is_rate_limited(device):
     assert plan(device) == []
 
 
-def test_speed_is_not_reasserted_while_stopped(device):
-    # Coasting down to zero after a stop is the device agreeing with us, not
-    # divergence to correct.
+def test_speed_is_not_reasserted_while_ai_paused(device):
+    # A narrative pause deliberately holds speed at zero while preserving the
+    # requested resume speed; firmware reports during that hold are not drift.
     device.apply_ai_commands({"pattern": "simple_stroke", "speed": 60})
     device.ingest_state({"state": "strokeEngine.idle", "sessionId": "s1"})
     plan(device)
@@ -300,12 +306,38 @@ def test_apply_ai_commands_derives_stroke_from_depth_and_base(device):
     assert device._desired["stroke"] == 35
 
 
-def test_stop_pattern_zeroes_speed(device):
+def test_ai_stop_preserves_resume_settings(device):
     device.apply_ai_commands({"pattern": "simple_stroke", "speed": 70})
     assert device._want_running is True
     device.apply_ai_commands({"pattern": "stop"})
+    assert device._want_running is True
+    assert device._motion_paused is True
+    assert device._desired["speed"] == 70
+
+
+def test_user_pause_is_a_zero_speed_hold(device):
+    device.apply_ai_commands({"pattern": "simple_stroke", "speed": 55})
+    device._fw_state = "strokeEngine.idle"
+    plan(device)
+    device.send_command({"cmd": "stopPattern"})
+    assert device._motion_paused is True
+    assert device._desired["speed"] == 55
+    assert [cmd for _, cmd in device._drain_plan()] == ["set:speed:0"]
+
+
+def test_explicit_user_stop_starts_auto_park(device):
+    device.apply_ai_commands({"pattern": "simple_stroke", "speed": 70})
+    device.ingest_state({
+        "timestamp": 1, "state": "strokeEngine.idle", "sessionId": "s1",
+        "speed": 70, "depth": 60, "stroke": 50, "sensation": 50,
+        "pattern": 0, "position": 60.0,
+    })
+    plan(device)
+
+    device.send_command({"cmd": "stop"})
+    assert device._parking is True
     assert device._want_running is False
-    assert device._desired["speed"] == 0
+    assert [cmd for _, cmd in device._drain_plan()] == ["set:speed:0"]
 
 
 def test_streaming_commands_are_dropped(device):
