@@ -24,14 +24,16 @@ re-sends whatever the device has drifted away from. Entering the mode, or a new
 sessionId, just clears the applied set and everything is pushed again — which
 also makes reconnects and mid-session menu trips self-healing.
 
-Position is simulated
----------------------
+Position is simulated during normal play
+----------------------------------------
 The firmware notifies only when its state *fingerprint* changes, and position
 is not part of that fingerprint — so there is no live position feed to drive a
 gauge from. Instead the same seven patterns the firmware runs are reproduced
 host-side by devices/stroke_patterns.py, driven from the settings the firmware
 *reports*, and the needle follows that. It mirrors what the machine has been
-told to do; it is not a measurement of where it is.
+told to do; it is not a measurement of where it is. During explicit Stop
+auto-park, however, the real firmware ``position`` field is sampled by small
+depth probes and becomes the sole source of truth.
 
 No controller assumed
 ---------------------
@@ -101,6 +103,30 @@ STROKE_ENGINE_DEFAULTS = {"speed": 0, "stroke": 50, "depth": 10, "sensation": 50
 SETTING_ORDER = ("pattern", "depth", "stroke", "sensation", "speed")
 
 PATTERN_COUNT = 7
+
+# Validated AIMO/Partner auto-park envelope.  The firmware's position field is
+# the physical source of truth during parking; the host-side pattern simulation
+# is deliberately ignored until the arm is confirmed back at the lower end.
+PARK_SPEED_CAP = 8
+PARK_ZONE_MIN = 0.0
+PARK_ZONE_MAX = 0.5
+PARK_SPEED1_STOP_POSITION = 2.5
+PARK_PROBE_DEPTH_A = 25
+PARK_PROBE_DEPTH_B = 24
+PARK_PROBE_INTERVAL = 0.13
+PARK_DESCENDING_CONFIRMATIONS = 3
+# Exact main-ramp constants ported from Partner beta14a auto-park.js.
+# The old final micro-recovery (depth 18/16) is intentionally NOT ported.
+PARK_RAMP_TARGET_SPEED = 1
+PARK_RAMP_TARGET_POSITION = 12.0
+PARK_FINAL_APPROACH_POSITION = 18.0
+PARK_FINAL_APPROACH_SPEED = 1
+PARK_RAMP_LATENCY_COMPENSATION_POSITION = 65.0
+PARK_RAMP_INTERVAL = 0.09
+PARK_POSITION_HIGH = 153.0
+PARK_START_SETTLE = 0.15
+PARK_STATE_TIMEOUT = 1.5
+PARK_TOTAL_TIMEOUT = 30.0
 
 # States the machine passes through before it has a valid zero.
 _UNHOMED_PREFIXES = ("idle", "homing", "hello", "error")
@@ -183,9 +209,15 @@ class OSSMBleDevice(AbstractDevice):
         self._desired["pattern"] = 0
         self._applied: Dict[str, int] = {}
         self._want_running = False
+        # Narrative/user Pause is a speed-zero hold inside StrokeEngine.  It is
+        # deliberately distinct from the explicit user Stop, which auto-parks.
+        self._motion_paused = False
         self._exit_requested = False
         self._last_mode_request = float("-inf")
         self._last_speed_reassert = float("-inf")
+        # Critical pause/stop transitions invalidate command batches already
+        # drained by the asynchronous writer.
+        self._command_epoch = 0
         self._outbox: deque = deque()
 
         # AI sends depth and base; the firmware wants depth and stroke.
@@ -194,6 +226,33 @@ class OSSMBleDevice(AbstractDevice):
 
         self._fw_state = ""
         self._session_id = ""
+        self._fw_timestamp: Optional[Any] = None
+        self._fw_position: Optional[float] = None
+        self._fw_speed = 0
+
+        # Explicit user Stop auto-park state. Narrative/user Pause uses a separate
+        # speed-zero hold and never enters this state machine.
+        self._parking = False
+        self._park_mode = ""
+        self._park_phase = ""
+        self._park_started_at = 0.0
+        self._park_phase_started_at = 0.0
+        self._park_last_probe_at = 0.0
+        self._park_last_timestamp: Optional[Any] = None
+        self._park_last_position: Optional[float] = None
+        self._park_descending_count = 0
+        self._park_return_confirmed = False
+        self._park_return_setup_sent = False
+        self._park_final_stop_armed = False
+        self._park_low_before_final_logged = False
+        self._park_last_ramp_speed: Optional[int] = None
+        self._park_last_ramp_at = 0.0
+        self._park_return_start_position: Optional[float] = None
+        self._park_menu_sent = False
+        self._park_probe_depth = PARK_PROBE_DEPTH_A
+        self._park_entry_speed = PARK_SPEED_CAP
+        self._park_saved_desired: Dict[str, int] = {}
+        self._park_blocked = False
 
         # Simulated position.
         self._pattern = None
@@ -214,7 +273,8 @@ class OSSMBleDevice(AbstractDevice):
 
         self._update_state(
             pct=0.0, steps=0, running=False, homed=False, engineReady=False,
-            fw_state="", in_stroke_engine=False,
+            fw_state="", in_stroke_engine=False, parking=False, parked=False,
+            paused=False, park_mode="", park_error="", park_blocked=False,
         )
 
         if BleakClient is None:
@@ -251,7 +311,8 @@ class OSSMBleDevice(AbstractDevice):
             if self._stop_event.is_set():
                 return False
             time.sleep(0.1)
-        return self._state.connected
+        result = bool(self._state.connected)
+        return result
 
     def disconnect(self) -> None:
         self._stop_event.set()
@@ -302,12 +363,43 @@ class OSSMBleDevice(AbstractDevice):
                 async with BleakClient(self._address) as client:
                     self._client = client
                     self._reset_link_state()
-                    self._update_state(connected=True)
-                    log.info("OSSM BLE connected")
-                    delay = RECONNECT_DELAY_INITIAL
 
+
+                    # Partner reference sequence: subscribe first, then retry
+                    # reading a usable JSON state. Keep the BLE link even when
+                    # readValue temporarily exposes an old ok:<command> value.
                     await client.start_notify(STATE_CHAR, self._on_state_notify)
+                    initial_payload = None
+                    for attempt in range(8):
+                        try:
+                            raw_state = await client.read_gatt_char(STATE_CHAR)
+                            raw_text = bytes(raw_state).decode("utf-8", "ignore")
+                            candidate = json.loads(raw_text)
+                            if (isinstance(candidate, dict)
+                                    and str(candidate.get("state", "") or "").strip()):
+                                initial_payload = candidate
+                                break
+                        except (ValueError, UnicodeDecodeError) as exc:
+                            pass
+                        except Exception as exc:
+                            log.debug(
+                                "OSSM BLE initial state read %s/8 skipped: %s",
+                                attempt + 1, exc)
+                        await asyncio.sleep(0.25)
+
+                    self._update_state(connected=True)
+                    if initial_payload is not None:
+                        self.ingest_state(initial_payload)
+                    else:
+                        log.warning(
+                            "OSSM BLE connected without initial JSON state; "
+                            "state notifications remain active")
+
                     await self._disable_speed_knob_limit(client)
+
+                    log.info("OSSM BLE connected (%s)",
+                             self._fw_state or "state pending")
+                    delay = RECONNECT_DELAY_INITIAL
 
                     writer = asyncio.create_task(self._writer_loop(client))
                     ticker = asyncio.create_task(self._tick_loop())
@@ -340,11 +432,22 @@ class OSSMBleDevice(AbstractDevice):
         """A new link knows nothing about what the device currently holds."""
         with self._lock:
             self._applied.clear()
+            self._command_epoch += 1
             self._outbox.clear()
             self._fw_state = ""
             self._session_id = ""
+            self._fw_timestamp = None
+            self._fw_position = None
+            self._fw_speed = 0
             self._exit_requested = False
             self._last_mode_request = float("-inf")
+            self._last_speed_reassert = float("-inf")
+            self._parking = False
+            self._park_mode = ""
+            self._park_phase = ""
+            self._park_saved_desired.clear()
+            self._park_blocked = False
+            self._motion_paused = False
 
     async def _disable_speed_knob_limit(self, client) -> None:
         """Take the physical speed knob out of the speed calculation.
@@ -381,20 +484,344 @@ class OSSMBleDevice(AbstractDevice):
 
         self._update_state(speed_knob_limit_disabled=confirmed)
 
+    # ── Pause / Stop auto-park ───────────────────────────────────────────────
+
+    def _request_motion_pause_locked(self, source: str) -> None:
+        """Hold speed at zero without parking or leaving StrokeEngine.
+
+        Used by narrative AI ``pattern=stop`` and the user Pause button.  The
+        desired geometry and speed are preserved for the next explicit resume.
+        Caller holds ``_lock``.
+        """
+        if self._parking:
+            return
+
+        self._motion_paused = True
+        self._command_epoch += 1
+        self._outbox.clear()
+        self._outbox.append("set:speed:0")
+        # The zero is queued explicitly; keep the reconciler from immediately
+        # restoring the saved desired speed while the pause remains active.
+        self._applied["speed"] = 0
+        self._sim_running = False
+        self._move_active = False
+        self._update_state(running=False, paused=True, parked=False)
+
+    def _resume_motion_locked(self, source: str) -> None:
+        """Release a speed-zero hold; settings are reconciled speed-last."""
+        if not self._motion_paused:
+            return
+        self._motion_paused = False
+        self._command_epoch += 1
+        # Remove a not-yet-drained pause zero and force a complete safe replay.
+        self._outbox.clear()
+        self._applied.clear()
+        self._exit_requested = False
+        self._update_state(paused=False, parked=False, park_error="")
+
+    @staticmethod
+    def _coerce_position(value: Any) -> Optional[float]:
+        try:
+            position = float(value)
+        except (TypeError, ValueError):
+            return None
+        return position if position == position else None
+
+    @staticmethod
+    def _is_park_position(position: Optional[float]) -> bool:
+        return (position is not None
+                and PARK_ZONE_MIN <= position <= PARK_ZONE_MAX)
+
+    def _request_park_locked(self, mode: str) -> None:
+        """Begin one automatic lower-end park.  Caller holds ``_lock``."""
+        if self._parking:
+            return
+
+        now = time.monotonic()
+        self._parking = True
+        self._motion_paused = False
+        self._command_epoch += 1
+        self._park_mode = "stop" if mode == "stop" else "pause"
+        self._park_phase = "stopping"
+        self._park_started_at = now
+        self._park_phase_started_at = now
+        self._park_last_probe_at = float("-inf")
+        self._park_last_timestamp = self._fw_timestamp
+        self._park_last_position = self._fw_position
+        self._park_descending_count = 0
+        self._park_return_confirmed = False
+        self._park_return_setup_sent = False
+        self._park_final_stop_armed = False
+        self._park_low_before_final_logged = False
+        self._park_last_ramp_speed = None
+        self._park_last_ramp_at = 0.0
+        self._park_return_start_position = None
+        self._park_menu_sent = False
+        self._park_probe_depth = PARK_PROBE_DEPTH_A
+        self._park_saved_desired = dict(self._desired)
+        self._park_blocked = False
+
+        reported = clamp_pct(self._fw_speed)
+        requested = clamp_pct(self._desired.get("speed", 0))
+        source_speed = reported if reported > 0 else requested
+        self._park_entry_speed = max(1, min(PARK_SPEED_CAP, source_speed or PARK_SPEED_CAP))
+        self._park_last_ramp_speed = self._park_entry_speed
+
+        self._want_running = False
+        self._exit_requested = True
+        self._applied.clear()
+        self._outbox.clear()
+        # First action is always an immediate speed zero.  The controlled park
+        # starts only after the real firmware position has been considered.
+        self._outbox.append("set:speed:0")
+        self._sim_running = False
+        self._move_active = False
+        self._update_state(
+            parking=True, parked=False, park_mode=self._park_mode,
+            park_error="", park_blocked=False, running=False, engineReady=False,
+        )
+
+    def _abort_park_locked(self, to_menu: bool, reason: str) -> None:
+        """Second stop / emergency path: zero immediately, no more parking."""
+        self._parking = False
+        self._motion_paused = False
+        self._command_epoch += 1
+        self._park_phase = ""
+        self._park_blocked = True
+        self._want_running = False
+        self._outbox.clear()
+        self._outbox.append("set:speed:0")
+        if to_menu:
+            self._outbox.append("go:menu")
+        self._applied.clear()
+        self._exit_requested = True
+        self._sim_running = False
+        self._move_active = False
+        self._update_state(
+            parking=False, parked=False, park_mode="",
+            park_error=reason, park_blocked=True,
+            running=False, engineReady=False,
+        )
+
+    def _complete_park_locked(self) -> None:
+        """Adopt the confirmed lower state and release Pause/Stop."""
+        mode = self._park_mode
+        saved = dict(self._park_saved_desired or self._desired)
+        self._parking = False
+        self._motion_paused = False
+        self._park_mode = ""
+        self._park_phase = ""
+        self._park_saved_desired.clear()
+        self._park_blocked = False
+        self._want_running = False
+        # Keep a successful Pause inside strokeEngine at speed zero.  Stop has
+        # already reached menu, where this flag is harmless.
+        self._exit_requested = True
+        self._applied.clear()
+        # Keep the GUI/session values for a later resume, but never command them
+        # until a fresh explicit Start/Resume occurs.
+        self._desired.update(saved)
+        self._sim_running = False
+        self._move_active = False
+        self._pos = 0.0
+        self._move_from = 0.0
+        self._move_to = 0.0
+        self._update_state(
+            pct=0.0, running=False, parking=False, parked=True,
+            park_mode="", park_error="", park_blocked=False,
+            engineReady=bool(self._state.connected and is_homed_state(self._fw_state)),
+            position_mm=self._fw_position,
+        )
+
+    def _compute_park_ramp_speed(self, position: Optional[float]) -> int:
+        """Exact Partner beta14a proportional ramp, translated to Python."""
+        entry_speed = clamp_pct(self._park_entry_speed)
+        if position is None:
+            return entry_speed
+        if position <= PARK_ZONE_MAX:
+            return 0
+        if position <= PARK_FINAL_APPROACH_POSITION:
+            return PARK_FINAL_APPROACH_SPEED
+
+        max_speed = max(PARK_RAMP_TARGET_SPEED, entry_speed)
+        effective_position = max(
+            PARK_RAMP_TARGET_POSITION,
+            position - PARK_RAMP_LATENCY_COMPENSATION_POSITION,
+        )
+        if effective_position <= PARK_RAMP_TARGET_POSITION:
+            return PARK_RAMP_TARGET_SPEED
+
+        effective_high = max(
+            PARK_RAMP_TARGET_POSITION + 1.0,
+            PARK_POSITION_HIGH - PARK_RAMP_LATENCY_COMPENSATION_POSITION,
+        )
+        ratio = max(0.0, min(
+            1.0,
+            (effective_position - PARK_RAMP_TARGET_POSITION)
+            / (effective_high - PARK_RAMP_TARGET_POSITION),
+        ))
+        raw_speed = (
+            PARK_RAMP_TARGET_SPEED
+            + (max_speed - PARK_RAMP_TARGET_SPEED) * ratio
+        )
+        # JavaScript Math.round() for non-negative values, not Python's
+        # bankers-rounding, so the port stays byte-for-byte equivalent in its
+        # speed decisions.
+        speed = int(raw_speed + 0.5)
+        return max(
+            PARK_RAMP_TARGET_SPEED,
+            min(max_speed, clamp_pct(speed)),
+        )
+
+    def _plan_park(self, now: float) -> List[str]:
+        """Advance the Partner beta14a main auto-park state machine.
+
+        The main proportional ramp is ported exactly. The abandoned final
+        micro-recovery is deliberately absent: a near-low final position never
+        starts another revolution.
+        """
+        commands: List[str] = []
+        position = self._fw_position
+
+        if now - self._park_started_at > PARK_TOTAL_TIMEOUT:
+            self._abort_park_locked(False, "auto-park timeout")
+            return []
+
+        if self._park_phase == "stopping":
+            if now - self._park_phase_started_at < PARK_START_SETTLE:
+                return commands
+            if position is None:
+                if now - self._park_phase_started_at > PARK_STATE_TIMEOUT:
+                    self._abort_park_locked(False, "position firmware indisponible")
+                return commands
+
+            if self._is_park_position(position):
+                if self._park_mode == "stop":
+                    self._park_phase = "menu_wait"
+                    self._park_phase_started_at = now
+                    self._park_menu_sent = True
+                    commands.append("go:menu")
+                else:
+                    self._complete_park_locked()
+                return commands
+
+            self._park_phase = "probing"
+            self._park_phase_started_at = now
+            self._park_last_probe_at = now
+            self._park_last_ramp_at = now
+            self._park_probe_depth = PARK_PROBE_DEPTH_A
+            commands.extend((
+                f"set:speed:{self._park_entry_speed}",
+                f"set:depth:{self._park_probe_depth}",
+            ))
+            return commands
+
+        if self._park_phase == "probing":
+            speed_one_low_enough = (
+                self._park_final_stop_armed
+                and self._fw_speed <= PARK_RAMP_TARGET_SPEED
+                and position is not None
+                and PARK_ZONE_MIN <= position <= PARK_SPEED1_STOP_POSITION
+            )
+            passed_lower_end = (
+                self._park_final_stop_armed
+                and self._park_return_confirmed
+                and position is not None
+                and position < PARK_ZONE_MIN
+            )
+            low_detected = self._is_park_position(position)
+
+            if self._park_final_stop_armed and (
+                    low_detected or speed_one_low_enough or passed_lower_end):
+                self._park_phase = "final_wait"
+                self._park_phase_started_at = now
+                commands.append("set:speed:0")
+                return commands
+
+            if low_detected and not self._park_final_stop_armed:
+                if not self._park_low_before_final_logged:
+                    self._park_low_before_final_logged = True
+
+            if self._park_return_confirmed and not self._park_return_setup_sent:
+                self._park_return_setup_sent = True
+                self._park_final_stop_armed = True
+                commands.extend(("set:pattern:0", "set:stroke:100"))
+
+            if (self._park_return_confirmed
+                    and position is not None
+                    and now - self._park_last_ramp_at >= PARK_RAMP_INTERVAL):
+                previous_speed = (
+                    self._park_last_ramp_speed
+                    if self._park_last_ramp_speed is not None
+                    else self._park_entry_speed
+                )
+                computed_speed = self._compute_park_ramp_speed(position)
+                next_speed = min(previous_speed, computed_speed)
+                if next_speed < previous_speed:
+                    self._park_last_ramp_speed = next_speed
+                    self._park_last_ramp_at = now
+                    commands.append(f"set:speed:{next_speed}")
+
+            if now - self._park_last_probe_at >= PARK_PROBE_INTERVAL:
+                self._park_probe_depth = (
+                    PARK_PROBE_DEPTH_B
+                    if self._park_probe_depth == PARK_PROBE_DEPTH_A
+                    else PARK_PROBE_DEPTH_A
+                )
+                self._park_last_probe_at = now
+                commands.append(f"set:depth:{self._park_probe_depth}")
+            return commands
+
+        if self._park_phase == "final_wait":
+            final_low = (
+                self._is_park_position(position)
+                or (self._park_return_confirmed
+                    and position is not None
+                    and position < PARK_ZONE_MIN)
+            )
+            if self._fw_speed == 0 and final_low:
+                if self._park_mode == "stop":
+                    self._park_phase = "menu_wait"
+                    self._park_phase_started_at = now
+                    if not self._park_menu_sent:
+                        self._park_menu_sent = True
+                        commands.append("go:menu")
+                else:
+                    self._complete_park_locked()
+            return commands
+
+        if self._park_phase == "menu_wait":
+            if self._fw_state.startswith("menu"):
+                self._complete_park_locked()
+            elif (not self._park_menu_sent
+                  or now - self._park_phase_started_at >= MODE_REQUEST_INTERVAL):
+                self._park_menu_sent = True
+                self._park_phase_started_at = now
+                commands.append("go:menu")
+            return commands
+
+        return commands
+
     # ── Writer ────────────────────────────────────────────────────────────────
 
     async def _writer_loop(self, client) -> None:
         while not self._stop_event.is_set():
-            for command in self._drain_plan():
+            for epoch, command in self._drain_plan():
+                with self._lock:
+                    if epoch != self._command_epoch:
+                        continue
                 try:
-                    await client.write_gatt_char(
-                        COMMAND_CHAR, command.encode("utf-8"), response=False)
-                    log.debug("OSSM BLE << %s", command)
+                    response = await self._write_command_and_wait(client, command)
+                    if response.startswith("fail:"):
+                        raise RuntimeError(
+                            f"OSSM firmware rejected {command}: {response}")
+                    log.debug("OSSM BLE << %s ; >> %s", command, response)
                 except Exception as exc:
                     log.warning("OSSM BLE write failed (%s): %s", command, exc)
-                    # A GATT write that fails means the link is unusable. Drop
-                    # it so the reconnect loop rebuilds it, rather than holding
-                    # a connection open that silently swallows every command.
+                    # Rebuild the link rather than retaining optimistic
+                    # _applied values after an incomplete command sequence.
+                    with self._lock:
+                        self._applied.clear()
                     try:
                         await client.disconnect()
                     except Exception:
@@ -403,12 +830,48 @@ class OSSMBleDevice(AbstractDevice):
                 await asyncio.sleep(WRITE_GAP)
             await asyncio.sleep(WRITER_INTERVAL)
 
-    def _drain_plan(self) -> List[str]:
+    async def _write_command_and_wait(self, client, command: str) -> str:
+        """Use the validated Partner transport semantics.
+
+        One command is written with response, then the command characteristic
+        is polled until it returns the command echo or an explicit
+        ok:<command> / fail:<command> acknowledgement. This prevents a
+        multi-command update from being blasted into the firmware queue.
+        """
+        payload = command.encode("utf-8")
+        await client.write_gatt_char(COMMAND_CHAR, payload, response=True)
+
+        last_text = ""
+        for attempt in range(8):
+            await asyncio.sleep(0.04 if attempt == 0 else 0.10)
+            try:
+                raw = await client.read_gatt_char(COMMAND_CHAR)
+                text = bytes(raw).decode("utf-8", "ignore").replace(
+                    "\x00", "").strip()
+                if text:
+                    last_text = text
+                if text in (command, f"ok:{command}", f"fail:{command}"):
+                    return text
+            except Exception as exc:
+                last_text = f"read-error:{exc}"
+
+        # Partner continues after a readable but stale response; however a
+        # completely unreadable characteristic is treated as a broken link.
+        if not last_text or last_text.startswith("read-error:"):
+            raise RuntimeError(
+                f"no readable acknowledgement for {command}: "
+                f"{last_text or 'empty'}")
+        return last_text
+
+    def _drain_plan(self) -> List[tuple[int, str]]:
         with self._lock:
+            epoch = self._command_epoch
             pending = list(self._outbox)
             self._outbox.clear()
             pending.extend(self._plan(time.monotonic()))
-            return pending
+            if pending:
+                pass
+            return [(epoch, command) for command in pending]
 
     def _plan(self, now: float) -> List[str]:
         """Commands that would bring the device in line with what we want.
@@ -417,10 +880,21 @@ class OSSMBleDevice(AbstractDevice):
         tested without a BLE stack.
         """
         commands: List[str] = []
+        if self._parking:
+            return self._plan_park(now)
+
         in_engine = is_in_stroke_engine(self._fw_state)
 
         if not in_engine:
             self._exit_requested = False
+
+        if self._motion_paused:
+            # A pause is not a session stop: stay in StrokeEngine and hold the
+            # real motor at zero until a later Start/AI pattern releases it.
+            if in_engine and self._applied.get("speed") != 0:
+                self._applied["speed"] = 0
+                commands.append("set:speed:0")
+            return commands
 
         if self._want_running:
             if not in_engine:
@@ -457,9 +931,10 @@ class OSSMBleDevice(AbstractDevice):
     # ── State notifications ───────────────────────────────────────────────────
 
     def _on_state_notify(self, _sender: Any, data: bytearray) -> None:
+        raw_text = bytes(data).decode("utf-8", "ignore")
         try:
-            payload = json.loads(bytes(data).decode("utf-8", "ignore"))
-        except (ValueError, UnicodeDecodeError):
+            payload = json.loads(raw_text)
+        except (ValueError, UnicodeDecodeError) as exc:
             return
         if isinstance(payload, dict):
             self.ingest_state(payload)
@@ -473,6 +948,8 @@ class OSSMBleDevice(AbstractDevice):
         depth = clamp_pct(payload.get("depth", 0))
         stroke = clamp_pct(payload.get("stroke", 0))
         sensation = clamp_pct(payload.get("sensation", 50))
+        timestamp = payload.get("timestamp")
+        position = self._coerce_position(payload.get("position"))
         try:
             pattern_index = int(payload.get("pattern", 0) or 0) % PATTERN_COUNT
         except (TypeError, ValueError):
@@ -491,30 +968,56 @@ class OSSMBleDevice(AbstractDevice):
 
             self._fw_state = fw_state
             self._session_id = session
-            if not in_engine:
+            self._fw_timestamp = timestamp
+            self._fw_position = position
+            self._fw_speed = speed
+            if not in_engine and not self._parking:
                 self._exit_requested = False
 
             # With the knob limit off, reported speed should match what we
-            # asked for. When it does not, the firmware has taken speed
-            # authority back: moving the knob past a deadband clears
-            # lastSpeedCommandWasFromBLE, and with no controller attached a
-            # floating ADC pin can trip that on its own. Re-assert instead of
-            # trusting _applied, which would otherwise never resend and leave
-            # the session stuck at whatever the pin happens to read.
+            # asked for. If the firmware gives speed authority back to the
+            # floating knob input, force a safe re-send of the requested speed.
             now = time.monotonic()
             if (in_engine and self._want_running
-                    # Only once we believe it landed. Before that the ordinary
-                    # reconciler is about to send it anyway, and counting that
-                    # as divergence would spend the rate-limit window on a
-                    # difference we already knew about.
                     and self._applied.get("speed") == self._desired["speed"]
                     and speed != self._desired["speed"]
                     and now - self._last_speed_reassert >= SPEED_REASSERT_INTERVAL):
                 self._last_speed_reassert = now
                 self._applied.pop("speed", None)
 
+            if self._parking and timestamp != self._park_last_timestamp:
+                previous = self._park_last_position
+                self._park_last_timestamp = timestamp
+                self._park_last_position = position
+                if previous is not None and position is not None:
+                    if position < previous:
+                        self._park_descending_count += 1
+                    else:
+                        self._park_descending_count = 0
+                    if (not self._park_return_confirmed
+                            and self._park_descending_count
+                            >= PARK_DESCENDING_CONFIRMATIONS):
+                        self._park_return_confirmed = True
+                        self._park_return_start_position = max(
+                            position,
+                            PARK_RAMP_TARGET_POSITION + 0.1,
+                        )
+
             self._sync_simulation(speed, depth, stroke, sensation,
                                   pattern_index, in_engine)
+            if self._park_blocked and self._is_park_position(position):
+                self._park_blocked = False
+                self._pos = 0.0
+                self._update_state(
+                    pct=0.0, parked=True, park_blocked=False, park_error="",
+                )
+            if self._parking and position is not None:
+                # During parking, show measured firmware position rather than
+                # the normal host-side simulation.
+                self._pos = max(0.0, min(100.0,
+                    (position / PARK_POSITION_HIGH) * 100.0))
+                self._sim_running = False
+                self._move_active = False
 
         homed = is_homed_state(fw_state)
         self._update_state(
@@ -524,13 +1027,20 @@ class OSSMBleDevice(AbstractDevice):
             # The stock firmware has no separate "engine ready" signal; once it
             # is homed and linked it will accept a mode change, which is what
             # the UI gate actually cares about.
-            engineReady=bool(self._state.connected and homed),
+            engineReady=bool(self._state.connected and homed
+                             and not self._parking and not self._park_blocked),
             fw_speed=speed,
             fw_depth=depth,
             fw_stroke=stroke,
             fw_sensation=sensation,
             fw_pattern=pattern_index,
-            position_mm=payload.get("position"),
+            position_mm=position,
+            parking=self._parking,
+            paused=self._motion_paused,
+            parked=(bool(self._state.extra.get("parked", False))
+                    and not self._parking and not self._park_blocked),
+            park_mode=self._park_mode,
+            park_blocked=self._park_blocked,
         )
 
     def _sync_simulation(self, speed: int, depth: int, stroke: int,
@@ -661,11 +1171,23 @@ class OSSMBleDevice(AbstractDevice):
                     index = 0
                 self._desired["pattern"] = max(0, min(PATTERN_COUNT - 1, index))
             elif cmd == "startPattern":
-                self._want_running = True
-                self._state.emergency_stopped = False
-            elif cmd in ("stopPattern", "stop"):
-                self._want_running = False
-                self._desired["speed"] = 0
+                if self._parking or self._park_blocked:
+                    pass
+                else:
+                    self._resume_motion_locked("user_resume")
+                    self._want_running = True
+                    self._state.emergency_stopped = False
+                    self._update_state(parked=False, paused=False, park_error="")
+            elif cmd == "stopPattern":
+                self._request_motion_pause_locked("user_pause")
+            elif cmd == "stop":
+                if self._parking:
+                    self._abort_park_locked(
+                        to_menu=True,
+                        reason="second arrêt pendant auto-park",
+                    )
+                else:
+                    self._request_park_locked("stop")
             elif cmd in ("stream", "moveTo"):
                 log.debug("OSSM BLE drops %r: stock firmware streaming is not "
                           "supported by this driver", cmd)
@@ -694,6 +1216,13 @@ class OSSMBleDevice(AbstractDevice):
                       "stock firmware")
 
         with self._lock:
+            # Narrative AI stop is only a temporary speed-zero hold.  Ignore
+            # the accompanying speed=0 so the previous settings remain available
+            # until the next AI turn.  It must never trigger auto-park.
+            if pattern == "stop":
+                self._request_motion_pause_locked("ai_stop")
+                return
+
             if speed is not None:
                 self._desired["speed"] = clamp_pct(speed)
             if depth is not None:
@@ -706,18 +1235,28 @@ class OSSMBleDevice(AbstractDevice):
             if intensity is not None:
                 self._desired["sensation"] = sensation_to_wire(intensity)
 
-            if pattern == "stop":
-                self._want_running = False
-                self._desired["speed"] = 0
-            elif pattern is not None:
+            if pattern is not None:
                 index = AI_TO_DEVICE_PATTERN_MAP.get(pattern, 0)
                 if index >= 0:
                     self._desired["pattern"] = index
-                self._want_running = True
-                self._state.emergency_stopped = False
+                if self._parking or self._park_blocked:
+                    pass
+                else:
+                    self._resume_motion_locked("ai_pattern")
+                    self._want_running = True
+                    self._state.emergency_stopped = False
+                    self._update_state(parked=False, paused=False, park_error="")
+
 
     def emergency_stop(self) -> None:
         with self._lock:
+            self._parking = False
+            self._motion_paused = False
+            self._command_epoch += 1
+            self._park_mode = ""
+            self._park_phase = ""
+            self._park_saved_desired.clear()
+            self._park_blocked = False
             self._want_running = False
             self._desired["speed"] = 0
             self._applied.clear()
@@ -731,7 +1270,9 @@ class OSSMBleDevice(AbstractDevice):
             self._move_active = False
 
         self._update_state(emergency_stopped=True, running=False,
-                           engineReady=False)
+                           engineReady=False, parking=False, parked=False,
+                           paused=False, park_mode="", park_error="arrêt d’urgence",
+                           park_blocked=False)
         log.warning("OSSM BLE EMERGENCY STOP")
 
     # ── Scan ──────────────────────────────────────────────────────────────────
