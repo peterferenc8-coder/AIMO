@@ -130,6 +130,62 @@ class SharedStream:
         return [(t, v) for t, v in self.rejected if t >= t0 - seconds]
 
 
+MARKER_STYLE = {
+    "edge": dict(color="red", label="edge (Space)"),
+    "calm": dict(color="limegreen", label="calm (S)"),
+}
+
+
+class MarkerStore:
+    """Ground-truth events the user marks by hand: Space = "on the edge, stop
+    stimulation", S = "calmed down, resume". No stimulation control happens
+    here -- these are just timestamps logged to CSV and drawn on both graphs
+    so a session can be reviewed against what was actually felt."""
+
+    def __init__(self, logger=None):
+        self.marks = deque(maxlen=1000)  # (t, label)
+        self.logger = logger
+
+    def add(self, t, label):
+        self.marks.append((t, label))
+        if self.logger:
+            self.logger.log(t, "event", label, label, "", "")
+
+    def window(self, t0, seconds):
+        return [(t, label) for t, label in self.marks if t >= t0 - seconds]
+
+
+def start_marker_keyboard_listener(marker_store, start_time):
+    """Space -> mark 'edge', S -> mark 'calm'. Debounced so OS key-repeat
+    doesn't spam multiple marks from one press."""
+    from pynput import keyboard
+
+    last_press = {"edge": 0.0, "calm": 0.0}
+    debounce_s = 0.5
+
+    def on_press(key):
+        label, tag = None, None
+        if key == keyboard.Key.space:
+            label, tag = "edge", "EDGE marked (Space) -- on the edge, stop"
+        else:
+            char = getattr(key, "char", None)
+            if char and char.lower() == "s":
+                label, tag = "calm", "CALM marked (S) -- calmed down, resume"
+
+        if label is None:
+            return
+        now = time.time()
+        if now - last_press[label] < debounce_s:
+            return
+        last_press[label] = now
+        marker_store.add(now - start_time, label)
+        print(f"\n>>> {tag} <<<")
+
+    listener = keyboard.Listener(on_press=on_press)
+    listener.start()
+    return listener
+
+
 # ---------------------------------------------------------------------------
 # Heart rate (BLE)
 # ---------------------------------------------------------------------------
@@ -276,8 +332,12 @@ def main():
 
     hr_stream = SharedStream(channel="hr", logger=logger)
     girth_stream = SharedStream(channel="girth", logger=logger)
+    marker_store = MarkerStore(logger=logger)
     stop_event = threading.Event()
     start_time = time.time()
+
+    kb_listener = start_marker_keyboard_listener(marker_store, start_time)
+    print("Press SPACE when you're on the edge (stop). Press S once calmed down (resume).")
 
     if args.demo:
         threads = [
@@ -310,8 +370,15 @@ def main():
     ax_girth.set_ylabel(f"Position ({girth_unit})")
     ax_girth.set_xlabel("Time (s)")
     ax_girth.grid(alpha=0.3)
-    ax_girth.legend(loc="upper right", fontsize=8)
+    marker_handles = [
+        plt.Line2D([], [], color=style["color"], linestyle="--", label=style["label"])
+        for style in MARKER_STYLE.values()
+    ]
+    ax_girth.legend(handles=[girth_bad] + marker_handles, loc="upper right", fontsize=8)
     girth_text = ax_girth.text(0.99, 0.92, "", transform=ax_girth.transAxes, ha="right", va="top")
+
+    hr_marker_lines = []
+    girth_marker_lines = []
 
     def update(_frame):
         now = time.time() - start_time
@@ -333,8 +400,19 @@ def main():
             girth_text.set_text(f"{ys[-1]:.1f} {girth_unit}")
         girth_bad.set_offsets(np.array(bad_pts) if bad_pts else np.empty((0, 2)))
 
+        for ln in hr_marker_lines:
+            ln.remove()
+        for ln in girth_marker_lines:
+            ln.remove()
+        hr_marker_lines.clear()
+        girth_marker_lines.clear()
+        for t, label in marker_store.window(now, args.window):
+            color = MARKER_STYLE[label]["color"]
+            hr_marker_lines.append(ax_hr.axvline(t, color=color, linestyle="--", alpha=0.7, lw=1.2))
+            girth_marker_lines.append(ax_girth.axvline(t, color=color, linestyle="--", alpha=0.7, lw=1.2))
+
         ax_hr.set_xlim(max(0, now - args.window), max(args.window, now))
-        return hr_line, girth_line, girth_bad, hr_text, girth_text
+        return hr_line, girth_line, girth_bad, hr_text, girth_text, *hr_marker_lines, *girth_marker_lines
 
     anim = FuncAnimation(fig, update, interval=PLOT_INTERVAL_MS, blit=False, cache_frame_data=False)
 
@@ -343,6 +421,7 @@ def main():
         plt.show()
     finally:
         stop_event.set()
+        kb_listener.stop()
         if logger:
             logger.close()
             print(f"[Log] Saved to {logger.path}")
