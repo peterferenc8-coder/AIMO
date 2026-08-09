@@ -25,15 +25,27 @@ Usage:
     python sensor_fusion_poc.py --demo                       # no hardware needed
     python sensor_fusion_poc.py --serial-port /dev/ttyUSB0    # real girth sensor + real HRM
     python sensor_fusion_poc.py --serial-port COM5 --um-per-count 0.002
+
+Every run also logs raw samples to CSV (logs/sensor_fusion/session_<ts>.csv
+by default, override with --log-file, disable with --no-log) so a session can
+be replayed offline in pandas while an algorithm is developed against it:
+    wall_clock, t, channel, value, raw_value, status, raw_frame
+"value" is what's plotted (post --um-per-count scaling for girth); raw_value
+is always the untouched sensor unit (raw Position count / raw BPM), so the
+log stays valid even if the calibration guess changes later.
 """
 
 import argparse
 import asyncio
+import csv
+import os
+import queue
 import random
 import re
 import threading
 import time
 from collections import deque
+from datetime import datetime
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -51,6 +63,42 @@ WINDOW_SECONDS = 60
 PLOT_INTERVAL_MS = 200
 
 
+class CsvLogger:
+    """Appends raw samples from both streams to one CSV via a dedicated writer
+    thread, so producer threads never block on file I/O."""
+
+    def __init__(self, path):
+        self.path = path
+        self._queue = queue.Queue()
+        self._stop = threading.Event()
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        self._file = open(path, "w", newline="")
+        self._writer = csv.writer(self._file)
+        self._writer.writerow(["wall_clock", "t", "channel", "value", "raw_value", "status", "raw_frame"])
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def log(self, t, channel, value, raw_value, status, raw_frame):
+        self._queue.put((
+            datetime.now().isoformat(timespec="milliseconds"),
+            f"{t:.4f}", channel, value, raw_value, status, raw_frame,
+        ))
+
+    def _run(self):
+        while not self._stop.is_set() or not self._queue.empty():
+            try:
+                row = self._queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            self._writer.writerow(row)
+            self._file.flush()
+
+    def close(self):
+        self._stop.set()
+        self._thread.join(timeout=2)
+        self._file.close()
+
+
 class SharedStream:
     """Thread-safe-enough ring buffer of (t, value) pairs for a live plot.
 
@@ -59,15 +107,21 @@ class SharedStream:
     guarantee you'd want in something safety-critical.
     """
 
-    def __init__(self, maxlen=5000):
+    def __init__(self, maxlen=5000, channel=None, logger=None):
         self.points = deque(maxlen=maxlen)   # (t, value)
         self.rejected = deque(maxlen=500)    # (t, value) -- bad-status frames
+        self.channel = channel
+        self.logger = logger
 
-    def add(self, t, value):
+    def add(self, t, value, status=None, raw_frame=None, raw_value=None):
         self.points.append((t, value))
+        if self.logger:
+            self.logger.log(t, self.channel, value, raw_value if raw_value is not None else value, status or "ok", raw_frame)
 
-    def add_rejected(self, t, value):
+    def add_rejected(self, t, value, status=None, raw_frame=None, raw_value=None):
         self.rejected.append((t, value))
+        if self.logger:
+            self.logger.log(t, self.channel, value, raw_value if raw_value is not None else value, status or "rejected", raw_frame)
 
     def window(self, t0, seconds):
         return [(t, v) for t, v in self.points if t >= t0 - seconds]
@@ -168,14 +222,14 @@ def girth_thread_main(stream, start_time, stop_event, port, baud, um_per_count):
             m = FRAME_RE.search(line)
             if not m:
                 continue
-            _raw_frame, position_str, status = m.groups()
+            raw_frame, position_str, status = m.groups()
             position = int(position_str)
             value = position * um_per_count if um_per_count else position
             t = time.time() - start_time
             if status == VALID_STATUS:
-                stream.add(t, value)
+                stream.add(t, value, status=status, raw_frame=raw_frame, raw_value=position)
             else:
-                stream.add_rejected(t, value)
+                stream.add_rejected(t, value, status=status, raw_frame=raw_frame, raw_value=position)
 
 
 def girth_demo_thread_main(stream, start_time, stop_event, um_per_count):
@@ -186,9 +240,11 @@ def girth_demo_thread_main(stream, start_time, stop_event, um_per_count):
         position += random.uniform(-15, 15)
         position = max(2000.0, min(4200.0, position))
         value = position * um_per_count if um_per_count else position
-        stream.add(now - start_time, value)
+        t = now - start_time
         if random.random() < 0.02:
-            stream.add_rejected(now - start_time, value)  # occasional bad-status frame
+            stream.add_rejected(t, value, status="0x20", raw_value=position)  # occasional bad-status frame
+        else:
+            stream.add(t, value, status=VALID_STATUS, raw_value=position)
         time.sleep(0.05)
 
 
@@ -203,13 +259,23 @@ def main():
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--um-per-count", type=float, default=None, help="convert raw Position counts to mm (device spec: 0.002)")
     parser.add_argument("--window", type=float, default=WINDOW_SECONDS, help="seconds of history shown on screen")
+    parser.add_argument("--log-file", default=None, help="CSV path to log raw samples to (default: logs/sensor_fusion/session_<timestamp>.csv)")
+    parser.add_argument("--no-log", action="store_true", help="disable CSV logging")
     args = parser.parse_args()
 
     if not args.demo and not args.serial_port:
         parser.error("--serial-port is required unless --demo is set")
 
-    hr_stream = SharedStream()
-    girth_stream = SharedStream()
+    logger = None
+    if not args.no_log:
+        log_path = args.log_file or os.path.join(
+            "logs", "sensor_fusion", f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        )
+        logger = CsvLogger(log_path)
+        print(f"[Log] Writing samples to {log_path}")
+
+    hr_stream = SharedStream(channel="hr", logger=logger)
+    girth_stream = SharedStream(channel="girth", logger=logger)
     stop_event = threading.Event()
     start_time = time.time()
 
@@ -277,6 +343,9 @@ def main():
         plt.show()
     finally:
         stop_event.set()
+        if logger:
+            logger.close()
+            print(f"[Log] Saved to {logger.path}")
 
 
 if __name__ == "__main__":
