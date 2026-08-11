@@ -253,6 +253,13 @@ class OSSMBleDevice(AbstractDevice):
         self._park_entry_speed = PARK_SPEED_CAP
         self._park_saved_desired: Dict[str, int] = {}
         self._park_blocked = False
+        # Set when an AI/user command asks for motion while a park from a
+        # *previous* session is still in flight. That command's pattern/speed
+        # already landed in _desired (those fields are unconditional), so once
+        # the park reaches a safe position the only thing to decide is whether
+        # to sit parked or carry the already-updated desired state straight
+        # into motion.
+        self._park_resume_pending = False
 
         # Simulated position.
         self._pattern = None
@@ -447,6 +454,7 @@ class OSSMBleDevice(AbstractDevice):
             self._park_phase = ""
             self._park_saved_desired.clear()
             self._park_blocked = False
+            self._park_resume_pending = False
             self._motion_paused = False
 
     async def _disable_speed_knob_limit(self, client) -> None:
@@ -560,6 +568,7 @@ class OSSMBleDevice(AbstractDevice):
         self._park_probe_depth = PARK_PROBE_DEPTH_A
         self._park_saved_desired = dict(self._desired)
         self._park_blocked = False
+        self._park_resume_pending = False
 
         reported = clamp_pct(self._fw_speed)
         requested = clamp_pct(self._desired.get("speed", 0))
@@ -588,6 +597,7 @@ class OSSMBleDevice(AbstractDevice):
         self._command_epoch += 1
         self._park_phase = ""
         self._park_blocked = True
+        self._park_resume_pending = False
         self._want_running = False
         self._outbox.clear()
         self._outbox.append("set:speed:0")
@@ -604,8 +614,20 @@ class OSSMBleDevice(AbstractDevice):
         )
 
     def _complete_park_locked(self) -> None:
-        """Adopt the confirmed lower state and release Pause/Stop."""
-        mode = self._park_mode
+        """Adopt the confirmed lower state and release Pause/Stop.
+
+        Normally this leaves the machine parked and idle until an explicit
+        later Start/Resume. But if an AI/user command asked for motion *while*
+        this park was still running (a new session starting in the few
+        seconds a previous session's Stop takes to reach the safe position),
+        that command's pattern/speed/etc already overwrote _desired — the
+        fields it touches are applied unconditionally regardless of parking.
+        Reverting to the pre-park snapshot here would silently discard that
+        command and leave the new session looking dead until the device was
+        reconnected. Instead, carry the already-updated desired state straight
+        into motion.
+        """
+        resume_pending = self._park_resume_pending and not self._park_blocked
         saved = dict(self._park_saved_desired or self._desired)
         self._parking = False
         self._motion_paused = False
@@ -613,19 +635,33 @@ class OSSMBleDevice(AbstractDevice):
         self._park_phase = ""
         self._park_saved_desired.clear()
         self._park_blocked = False
-        self._want_running = False
-        # Keep a successful Pause inside strokeEngine at speed zero.  Stop has
-        # already reached menu, where this flag is harmless.
-        self._exit_requested = True
+        self._park_resume_pending = False
         self._applied.clear()
-        # Keep the GUI/session values for a later resume, but never command them
-        # until a fresh explicit Start/Resume occurs.
-        self._desired.update(saved)
         self._sim_running = False
         self._move_active = False
         self._pos = 0.0
         self._move_from = 0.0
         self._move_to = 0.0
+
+        if resume_pending:
+            self._want_running = True
+            self._exit_requested = False
+            self._update_state(
+                pct=0.0, running=False, parking=False, parked=False,
+                park_mode="", park_error="", park_blocked=False,
+                engineReady=bool(self._state.connected
+                                  and is_homed_state(self._fw_state)),
+                position_mm=self._fw_position,
+            )
+            return
+
+        self._want_running = False
+        # Keep a successful Pause inside strokeEngine at speed zero.  Stop has
+        # already reached menu, where this flag is harmless.
+        self._exit_requested = True
+        # Keep the GUI/session values for a later resume, but never command them
+        # until a fresh explicit Start/Resume occurs.
+        self._desired.update(saved)
         self._update_state(
             pct=0.0, running=False, parking=False, parked=True,
             park_mode="", park_error="", park_blocked=False,
@@ -1171,8 +1207,12 @@ class OSSMBleDevice(AbstractDevice):
                     index = 0
                 self._desired["pattern"] = max(0, min(PATTERN_COUNT - 1, index))
             elif cmd == "startPattern":
-                if self._parking or self._park_blocked:
+                if self._park_blocked:
                     pass
+                elif self._parking:
+                    # A park from a previous Stop is still running; honor this
+                    # once it reaches a safe position instead of dropping it.
+                    self._park_resume_pending = True
                 else:
                     self._resume_motion_locked("user_resume")
                     self._want_running = True
@@ -1239,8 +1279,15 @@ class OSSMBleDevice(AbstractDevice):
                 index = AI_TO_DEVICE_PATTERN_MAP.get(pattern, 0)
                 if index >= 0:
                     self._desired["pattern"] = index
-                if self._parking or self._park_blocked:
+                if self._park_blocked:
                     pass
+                elif self._parking:
+                    # A previous session's Stop is still auto-parking. The
+                    # speed/depth/pattern above already landed in _desired, so
+                    # once the park reaches a safe position, resume with them
+                    # instead of silently sitting parked and looking dead to
+                    # this (new) session.
+                    self._park_resume_pending = True
                 else:
                     self._resume_motion_locked("ai_pattern")
                     self._want_running = True
@@ -1257,6 +1304,7 @@ class OSSMBleDevice(AbstractDevice):
             self._park_phase = ""
             self._park_saved_desired.clear()
             self._park_blocked = False
+            self._park_resume_pending = False
             self._want_running = False
             self._desired["speed"] = 0
             self._applied.clear()

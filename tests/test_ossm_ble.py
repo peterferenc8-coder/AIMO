@@ -340,6 +340,72 @@ def test_explicit_user_stop_starts_auto_park(device):
     assert [cmd for _, cmd in device._drain_plan()] == ["set:speed:0"]
 
 
+def test_ai_command_during_park_resumes_once_parked_instead_of_going_mute(device):
+    # Regression for a real bug report: a new AI session starting while the
+    # previous session's explicit Stop is still auto-parking must not go
+    # silently unresponsive until the app disconnects/reconnects the device.
+    #
+    # _plan()/_plan_park() key off time.monotonic(), so (unlike the other
+    # reconciler tests, which never touch parking) this one has to advance a
+    # real monotonic clock rather than an arbitrary fixed `now`.
+    import time as time_module
+
+    device.apply_ai_commands({"pattern": "simple_stroke", "speed": 70})
+    device.ingest_state({
+        "timestamp": 1, "state": "strokeEngine.idle", "sessionId": "s1",
+        "speed": 70, "depth": 60, "stroke": 50, "sensation": 50,
+        "pattern": 0, "position": 60.0,
+    })
+    plan(device)
+
+    device.send_command({"cmd": "stop"})
+    now = time_module.monotonic()
+    plan(device, now=now + 0.2)  # past PARK_START_SETTLE -> probing begins
+
+    # Drive the (real) firmware position down, as the park ramp would.
+    position = 60.0
+    for i, ts in enumerate(range(2, 7)):
+        position -= 15
+        device.ingest_state({
+            "timestamp": ts, "state": "strokeEngine.idle", "sessionId": "s1",
+            "position": position,
+        })
+        plan(device, now=now + 0.2 + i * 0.15)
+    assert device._park_return_confirmed is True
+
+    # A brand-new AI session's first turn lands while the park is still
+    # running — its settings must not be dropped.
+    device.apply_ai_commands({"pattern": "insist", "speed": 55, "depth": 70,
+                              "base": 10})
+    assert device._parking is True
+    assert device._want_running is False
+    assert device._park_resume_pending is True
+    assert device._desired["speed"] == 55
+
+    # Finish the park down to the safe zone and back to menu.
+    for i, ts in enumerate(range(7, 13)):
+        position = max(0.0, position - 15)
+        device.ingest_state({
+            "timestamp": ts, "state": "strokeEngine.idle", "sessionId": "s1",
+            "position": position, "speed": 0,
+        })
+        plan(device, now=now + 1.0 + i * 0.15)
+    device.ingest_state({
+        "timestamp": 13, "state": "menu.idle", "sessionId": "s1",
+        "position": 0.1,
+    })
+    plan(device, now=now + 2.0)
+
+    # The park has completed and the new session's intent takes over instead
+    # of reverting to the stale pre-park settings and sitting parked.
+    assert device._parking is False
+    assert device._park_resume_pending is False
+    assert device._want_running is True
+    assert device._desired["speed"] == 55
+    assert device._desired["depth"] == 70
+    assert plan(device, now=now + 2.5) == ["go:strokeEngine"]
+
+
 def test_streaming_commands_are_dropped(device):
     device.apply_ai_commands({"pattern": "simple_stroke", "speed": 40})
     device._fw_state = "strokeEngine.idle"
